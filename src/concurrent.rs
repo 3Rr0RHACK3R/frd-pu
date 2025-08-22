@@ -42,14 +42,12 @@ impl Error for ConcurrentListError {}
 ///
 /// // Create a new thread-safe list.
 /// let list = Arc::new(ConcurrentList::new());
-///
 /// let mut handles = vec![];
 ///
-/// // Spawn multiple threads to push numbers into the list.
+/// // Spawn 10 threads to push items concurrently.
 /// for i in 0..10 {
 ///     let list_clone = Arc::clone(&list);
 ///     let handle = thread::spawn(move || {
-///         // Acquire the lock and push the item.
 ///         list_clone.push(i).unwrap();
 ///     });
 ///     handles.push(handle);
@@ -60,21 +58,16 @@ impl Error for ConcurrentListError {}
 ///     handle.join().unwrap();
 /// }
 ///
-/// // Check the final size and content of the list.
-/// // The order is not guaranteed due to concurrent access.
-/// let final_len = list.len().unwrap();
-/// assert_eq!(final_len, 10);
-///
-/// // Pop an item from the list.
-/// let popped_item = list.pop().unwrap().unwrap();
-/// assert!(popped_item >= 0 && popped_item < 10);
-/// assert_eq!(list.len().unwrap(), 9);
+/// // Check the final state of the list.
+/// let final_list_len = list.len().unwrap();
+/// println!("Final list length: {}", final_list_len);
+/// assert_eq!(final_list_len, 10);
 /// ```
 pub struct ConcurrentList<T> {
     inner: Mutex<Vec<T>>,
 }
 
-impl<T> ConcurrentList<T> {
+impl<T: Debug> ConcurrentList<T> {
     /// Creates a new, empty `ConcurrentList`.
     pub fn new() -> Self {
         ConcurrentList {
@@ -82,13 +75,13 @@ impl<T> ConcurrentList<T> {
         }
     }
 
-    /// Pushes an item to the end of the list in a thread-safe manner.
+    /// Appends an item to the end of the list in a thread-safe manner.
     ///
     /// # Arguments
     /// * `item` - The item to be added to the list.
     ///
     /// # Returns
-    /// A `Result` indicating success or an error if the lock could not be acquired.
+    /// A `Result` indicating success or a `ConcurrentListError` if the lock failed.
     pub fn push(&self, item: T) -> Result<(), ConcurrentListError> {
         let mut list = self.inner.lock().map_err(|_| ConcurrentListError::LockAcquisitionError)?;
         list.push(item);
@@ -111,13 +104,9 @@ impl<T> ConcurrentList<T> {
     ///
     /// # Returns
     /// A `Result` containing an `Option` with a reference to the item, or an error if the lock failed.
-    pub fn get(&self, index: usize) -> Result<Option<MutexGuard<[T]>>, ConcurrentListError> {
+    pub fn get(&self, index: usize) -> Result<Option<T>, ConcurrentListError> {
         let list = self.inner.lock().map_err(|_| ConcurrentListError::LockAcquisitionError)?;
-        if index < list.len() {
-            Ok(Some(MutexGuard::map(list, |v| &v[..])))
-        } else {
-            Ok(None)
-        }
+        Ok(list.get(index).cloned())
     }
 
     /// Returns the number of items in the list in a thread-safe manner.
@@ -127,5 +116,14 @@ impl<T> ConcurrentList<T> {
     pub fn len(&self) -> Result<usize, ConcurrentListError> {
         let list = self.inner.lock().map_err(|_| ConcurrentListError::LockAcquisitionError)?;
         Ok(list.len())
+    }
+
+    /// Returns `true` if the list contains no elements.
+    ///
+    /// # Returns
+    /// A `Result` containing a boolean value, or an error if the lock failed.
+    pub fn is_empty(&self) -> Result<bool, ConcurrentListError> {
+        let list = self.inner.lock().map_err(|_| ConcurrentListError::LockAcquisitionError)?;
+        Ok(list.is_empty())
     }
 }

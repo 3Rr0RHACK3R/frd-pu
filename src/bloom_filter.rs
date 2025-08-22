@@ -41,39 +41,40 @@ impl BloomFilter {
             return Err(BloomFilterError::InvalidCapacity);
         }
 
-        // Calculate the optimal number of bits (m)
-        let m_f64 = (-1.0 * (capacity as f64) * false_positive_probability.ln()) / (2.0f64.ln().powi(2));
-        let m = (m_f64.ceil() as usize);
+        // Calculate the optimal size of the bit vector (m) and the number of hash functions (k).
+        // m = -(n * ln(p)) / (ln(2)^2)
+        let m = (-(capacity as f64) * false_positive_probability.ln() / f64::consts::LN_2.powi(2)).ceil() as usize;
+        // k = (m/n) * ln(2)
+        let k = ((m as f64) / (capacity as f64) * f64::consts::LN_2).ceil() as usize;
 
-        // Calculate the optimal number of hash functions (k)
-        let k_f64 = (m_f64 / (capacity as f64)) * 2.0f64.ln();
-        let k = (k_f64.ceil() as usize).max(1);
+        // Ensure m is at least 1 to avoid an empty bit vector.
+        let m = m.max(1);
+        let k = k.max(1);
 
-        // Ensure m is a power of 2 and a multiple of 8 for bitwise operations and byte-based storage
-        // This is a crucial fix to avoid runtime panics and ensure proper functionality
-        let m = ((m as u64).next_power_of_2() as usize).max(8);
-        
-        // The bit vector size in bytes
-        let m_bytes = m / 8;
-
-        Ok(BloomFilter {
-            bit_vector: vec![0; m_bytes],
+        Ok(Self {
+            bit_vector: vec![0; m / 8 + 1],
             k,
             m,
         })
     }
 
-    /// Adds an item to the Bloom filter.
+    /// Adds an item to the set by setting the corresponding bits in the bit vector.
+    ///
+    /// The bit indices are determined by running the item through `k` different hash functions.
+    ///
+    /// # Arguments
+    /// * `item` - The item to add to the filter. It must implement the `Hash` trait.
     pub fn add<T: Hash + ?Sized>(&mut self, item: &T) {
         for i in 0..self.k {
             let mut hasher = DefaultHasher::new();
-            // This is a simple but effective way to generate different hashes
-            // It relies on hashing both the loop index and the item
+            // This is a simple but effective way to generate different hashes.
+            // It relies on hashing both the loop index and the item.
             (i, item).hash(&mut hasher);
             let hash = hasher.finish();
             
-            // Custom bitwise modulo to replace math_utils
-            let bit_index = (hash as usize) & (self.m - 1);
+            // We use a modulo operation to get the correct bit index.
+            // The previous bitwise AND was incorrect because 'm' is not guaranteed to be a power of 2.
+            let bit_index = (hash as usize) % self.m;
             
             let byte_index = bit_index / 8;
             let bit_offset = bit_index % 8;
@@ -91,18 +92,21 @@ impl BloomFilter {
             (i, item).hash(&mut hasher);
             let hash = hasher.finish();
 
-            // Custom bitwise modulo to replace math_utils
-            let bit_index = (hash as usize) & (self.m - 1);
+            // We use a modulo operation to get the correct bit index.
+            // The previous bitwise AND was incorrect because 'm' is not guaranteed to be a power of 2.
+            let bit_index = (hash as usize) % self.m;
 
             let byte_index = bit_index / 8;
             let bit_offset = bit_index % 8;
             if (self.bit_vector[byte_index] & (1 << bit_offset)) == 0 {
+                // If any of the bits are not set, the item is definitely not in the filter.
                 return false;
             }
         }
+
+        // If all bits are set, the item is probably in the filter.
         true
     }
 }
 
-// Re-export the public API for easy access.
-pub use BloomFilter as new_bloom_filter;
+

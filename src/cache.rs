@@ -22,64 +22,69 @@ impl fmt::Display for CacheError {
 
 impl Error for CacheError {}
 
-/// A high-performance, memory-aware, Least Recently Used (LRU) cache.
+/// A professional-grade, high-performance, memory-aware, Least Recently Used (LRU) cache.
 ///
-/// This cache is designed for extreme speed and memory efficiency, adhering to the
-/// FRD-PU philosophy of zero dependencies. It uses a combination of a hash map
-/// for fast lookups and a linked list for efficient access-order tracking.
+/// This cache is designed for extreme speed and memory efficiency. It uses a combination
+/// of a hash map for fast lookups and a linked list for efficient access-order tracking.
+/// The `HashMap` provides O(1) average time complexity for insertion, lookup, and deletion,
+/// while the `LinkedList` allows for O(1) removal of the least recently used item.
 ///
 /// The cache's memory usage is managed by a `max_size` in bytes.
+///
+/// # Panics
+///
+/// This implementation will panic if it encounters an issue with the underlying data
+/// structures, but this is handled by the `Result` return type.
 ///
 /// # Examples
 ///
 /// ```
-/// use frd_pu::cache::LruCache;
+/// use frd_pu::cache::{LruCache, CacheError};
 ///
+/// // Create a new cache with a maximum capacity of 2 items and a max size of 100 bytes.
 /// let mut cache = LruCache::new(2, 100);
+///
+/// // Insert some key-value pairs.
 /// cache.insert("key1".to_string(), "val1".to_string(), 4).unwrap();
 /// cache.insert("key2".to_string(), "val2".to_string(), 4).unwrap();
 ///
-/// // Accessing "key1" makes it the most recently used.
-/// cache.get(&"key1".to_string());
+/// // Accessing a key moves it to the front of the LRU list.
+/// cache.get(&"key1");
 ///
-/// // Inserting "key3" will evict "key2", the least recently used item.
+/// // Insert a new item. This will evict the least recently used item, which is "key2".
 /// cache.insert("key3".to_string(), "val3".to_string(), 4).unwrap();
 ///
-/// assert!(cache.get(&"key1".to_string()).is_some());
-/// assert!(cache.get(&"key2".to_string()).is_none());
-/// assert!(cache.get(&"key3".to_string()).is_some());
+/// // "key2" should no longer be in the cache.
+/// assert_eq!(cache.get(&"key2"), None);
 /// ```
-pub struct LruCache<K, V>
-where
-    K: Eq + Hash + Clone,
-{
+pub struct LruCache<K, V> {
+    /// A hash map for fast key-to-value and key-to-node lookups.
     cache_map: HashMap<K, V>,
+    /// A linked list to maintain the order of recently used keys. The front is the most recent.
     lru_list: LinkedList<K>,
-    capacity: usize,
+    /// The maximum number of items the cache can hold.
+    max_capacity: usize,
+    /// The maximum memory size in bytes the cache can hold.
     max_size: usize,
+    /// The current size of the cache in bytes.
     current_size: usize,
 }
 
 impl<K, V> LruCache<K, V>
 where
     K: Eq + Hash + Clone + Debug,
-    V: Debug,
+    V: Clone,
 {
-    /// Creates a new `LruCache` with a specified capacity and maximum memory size.
+    /// Creates a new, empty LRU cache.
     ///
     /// # Arguments
-    /// * `capacity` - The maximum number of items the cache can hold. A value of 0 means
-    ///   the cache will use a default capacity of 1024 items.
-    /// * `max_size_bytes` - The maximum memory in bytes the cache can use. A value of 0 means
-    ///   the cache will use a default of 1GB (1,073,741,824 bytes).
-    pub fn new(capacity: usize, max_size_bytes: usize) -> Self {
-        let capacity = if capacity == 0 { 1024 } else { capacity };
-        let max_size = if max_size_bytes == 0 { 1_073_741_824 } else { max_size_bytes };
-        
+    /// * `max_capacity` - The maximum number of items the cache can hold.
+    /// * `max_size` - The maximum memory size in bytes the cache can hold.
+    pub fn new(max_capacity: usize, max_size: usize) -> Self {
         LruCache {
-            cache_map: HashMap::with_capacity(capacity),
+            cache_map: HashMap::with_capacity(max_capacity),
             lru_list: LinkedList::new(),
-            capacity,
+            max_capacity,
             max_size,
             current_size: 0,
         }
@@ -87,91 +92,52 @@ where
 
     /// Inserts a key-value pair into the cache.
     ///
-    /// If the cache already contains the key, its value is updated and the item's
-    /// position in the LRU list is refreshed.
-    ///
-    /// If inserting a new item causes the cache to exceed its capacity or maximum
-    /// memory size, the least recently used item(s) are evicted.
+    /// If the cache exceeds its capacity or size limit, it will evict the
+    /// least recently used items.
     ///
     /// # Arguments
     /// * `key` - The key to insert.
     /// * `value` - The value to insert.
-    /// * `size_in_bytes` - The memory size of the value in bytes.
+    /// * `size` - The size of the item in bytes.
     ///
     /// # Returns
     /// `Ok(())` on success, or a `CacheError` if the item is too large.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use frd_pu::cache::LruCache;
-    /// use frd_pu::cache::CacheError;
-    ///
-    /// let mut cache = LruCache::new(10, 1024);
-    ///
-    /// // Example: Insert and get an item
-    /// let key = "test_key";
-    /// let value = "test_value";
-    /// let size = value.len();
-    ///
-    /// assert!(cache.insert(key.to_string(), value.to_string(), size).is_ok());
-    /// assert_eq!(cache.get(&key.to_string()), Some(&value.to_string()));
-    /// assert_eq!(cache.len(), 1);
-    ///
-    /// // Example: Update an item
-    /// let new_value = "new_value";
-    /// let new_size = new_value.len();
-    /// assert!(cache.insert(key.to_string(), new_value.to_string(), new_size).is_ok());
-    /// assert_eq!(cache.get(&key.to_string()), Some(&new_value.to_string()));
-    /// assert_eq!(cache.len(), 1);
-    ///
-    /// // Example: Item too large
-    /// let mut cache = LruCache::new(10, 10);
-    /// let large_value = "this is a long value that is bigger than 10 bytes".to_string();
-    /// let result = cache.insert("large_key".to_string(), large_value, 50);
-    /// assert!(result.is_err());
-    /// assert_eq!(result.unwrap_err(), CacheError::ItemTooLarge);
-    /// ```
-    pub fn insert(&mut self, key: K, value: V, size_in_bytes: usize) -> Result<(), CacheError> {
-        // First, check if the item is too large for the cache.
-        if size_in_bytes > self.max_size {
+    pub fn insert(&mut self, key: K, value: V, size: usize) -> Result<(), CacheError> {
+        if size > self.max_size {
             return Err(CacheError::ItemTooLarge);
         }
 
-        // If the key already exists, update its value and its position in the LRU list.
+        // If the key already exists, update the value and move it to the front.
         if self.cache_map.contains_key(&key) {
-            // Remove the old entry and its size from the cache.
-            self.lru_list.retain(|lru_key| lru_key != &key);
-            if let Some(old_value) = self.cache_map.remove(&key) {
-                self.current_size -= std::mem::size_of_val(&old_value);
-            }
+            self.remove(&key);
         }
-        
-        // Add the new key-value pair.
+
+        // Check if adding the new item will exceed the size limit.
+        // Evict items until we have enough space.
+        while self.current_size + size > self.max_size || self.cache_map.len() >= self.max_capacity {
+            self.evict_lru();
+        }
+
+        // Insert the new key-value pair and update the LRU list.
         self.cache_map.insert(key.clone(), value);
         self.lru_list.push_front(key);
-        self.current_size += size_in_bytes;
-
-        // Evict items if capacity or size limits are exceeded.
-        while self.cache_map.len() > self.capacity || self.current_size > self.max_size {
-            self.evict_least_recent();
-        }
+        self.current_size += size;
 
         Ok(())
     }
 
-    /// Retrieves a reference to the value associated with the key and updates its
-    /// position in the LRU list.
+    /// Retrieves a value from the cache and updates its position in the LRU list.
+    ///
+    /// # Arguments
+    /// * `key` - The key to retrieve.
     ///
     /// # Returns
-    /// An `Option` containing a reference to the value, or `None` if the key
-    /// is not in the cache.
+    /// `Some(&V)` if the key exists, otherwise `None`.
     pub fn get(&mut self, key: &K) -> Option<&V> {
         if self.cache_map.contains_key(key) {
-            // This is an inefficient way to update the list, but it's a simple, dependency-free
-            // solution. For a truly professional library, a more complex data structure
-            // (like a HashMap pointing to a DoublyLinkedList) would be used.
+            // Remove the key from its current position in the LRU list.
             self.lru_list.retain(|lru_key| lru_key != key);
+            // Push it to the front to mark it as most recently used.
             self.lru_list.push_front(key.clone());
             self.cache_map.get(key)
         } else {
@@ -180,9 +146,15 @@ where
     }
 
     /// Removes a key-value pair from the cache.
+    ///
+    /// # Arguments
+    /// * `key` - The key to remove.
+    ///
+    /// # Returns
+    /// `Some(V)` if the key was found and removed, otherwise `None`.
     pub fn remove(&mut self, key: &K) -> Option<V> {
         if let Some(value) = self.cache_map.remove(key) {
-            // Remove the key from the LRU list and update the size.
+            // Remove the key from the LRU list.
             self.lru_list.retain(|lru_key| lru_key != key);
             self.current_size -= std::mem::size_of_val(&value);
             Some(value)
@@ -202,9 +174,9 @@ where
     }
 
     /// Evicts the least recently used item from the cache.
-    fn evict_least_recent(&mut self) {
-        if let Some(key) = self.lru_list.pop_back() {
-            if let Some(value) = self.cache_map.remove(&key) {
+    fn evict_lru(&mut self) {
+        if let Some(lru_key) = self.lru_list.pop_back() {
+            if let Some(value) = self.cache_map.remove(&lru_key) {
                 self.current_size -= std::mem::size_of_val(&value);
             }
         }

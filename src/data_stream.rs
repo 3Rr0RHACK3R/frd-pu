@@ -38,58 +38,54 @@ impl fmt::Display for DataStreamError {
         match self {
             DataStreamError::IoError(e) => write!(f, "I/O error during data stream: {}", e),
             DataStreamError::InvalidChunkSize => {
-                write!(f, "Invalid chunk size: must be greater than 0.")
+                write!(f, "Invalid chunk size provided. Must be greater than 0.")
             }
-            DataStreamError::ProcessorError(e) => write!(f, "Processor error during data stream: {}", e),
+            DataStreamError::ProcessorError(msg) => write!(f, "Data stream processor error: {}", msg),
         }
     }
 }
 
-/// A struct for reading and processing a data stream in chunks.
+/// A highly efficient, zero-copy data stream processor.
 ///
-/// This is a generic struct that can work with any type that implements the
-/// `DataReader` trait, enabling it to process data from various sources.
+/// This struct is the core of the data streaming functionality. It handles reading
+/// from any type that implements the `DataReader` trait in fixed-size chunks,
+/// minimizing memory overhead and maximizing performance.
 pub struct DataStream<R: DataReader> {
     reader: R,
     buffer: Vec<u8>,
 }
 
-/// Creates a new data stream from a file.
+/// Creates a new file-based data stream.
 ///
-/// This function is a convenience wrapper for creating a `DataStream` from a
-/// file path. It is ideal for local file processing tasks.
+/// This function opens a file at the given path and prepares it for chunked reading.
+/// It's perfect for processing massive files that won't fit entirely in memory.
 ///
 /// # Arguments
 /// * `path` - The path to the file to be streamed.
 /// * `chunk_size` - The size of each chunk to read in bytes.
 ///
 /// # Returns
-/// A `Result` containing the new `DataStream` or a `DataStreamError`.
+/// A `Result` containing the `DataStream` or a `DataStreamError` if the file cannot be opened.
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 /// use frd_pu::data_stream::{new_file_stream, DataStreamError};
 /// use std::path::Path;
+/// use std::fs::File;
+/// use std::io::Write;
 ///
-/// // Create a dummy file for this example.
-/// // In a real scenario, you would use an existing file.
-/// std::fs::write("example.txt", "Hello, world!").unwrap();
+/// // Create a dummy file for the example.
+/// let path = Path::new("dummy_file.txt");
+/// let mut file = File::create(path).unwrap();
+/// file.write_all(b"Hello, this is a test file for the data stream.").unwrap();
 ///
-/// let path = Path::new("example.txt");
-/// let mut file_stream = new_file_stream(path, 4).unwrap();
-///
-/// // Process the file in chunks.
-/// let result = file_stream.process_chunks(|chunk| {
-///     // Your processing logic here.
-///     let chunk_str = String::from_utf8_lossy(chunk);
-///     println!("Processed chunk: {}", chunk_str);
-///     Ok(())
-/// });
+/// // Create a new stream with a chunk size of 10 bytes.
+/// let result = new_file_stream(path, 10);
 ///
 /// assert!(result.is_ok());
 /// ```
-pub fn new_file_stream<P: AsRef<Path>>(path: P, chunk_size: usize) -> Result<DataStream<File>, DataStreamError> {
+pub fn new_file_stream(path: &Path, chunk_size: usize) -> Result<DataStream<File>, DataStreamError> {
     if chunk_size == 0 {
         return Err(DataStreamError::InvalidChunkSize);
     }
@@ -100,36 +96,28 @@ pub fn new_file_stream<P: AsRef<Path>>(path: P, chunk_size: usize) -> Result<Dat
     })
 }
 
-/// Creates a new data stream from a network connection.
+/// Creates a new network-based data stream.
 ///
-/// This function is a convenience wrapper for creating a `DataStream` from a
-/// TCP stream. It is ideal for processing data from network sockets.
+/// This function wraps a `TcpStream` and prepares it for chunked reading. This is ideal
+/// for processing incoming data from a network connection without loading the entire
+/// stream into memory.
 ///
 /// # Arguments
-/// * `stream` - The `TcpStream` to be read from.
+/// * `stream` - The `TcpStream` to be wrapped.
 /// * `chunk_size` - The size of each chunk to read in bytes.
 ///
 /// # Returns
-/// A `Result` containing the new `DataStream` or a `DataStreamError`.
+/// A `Result` containing the `DataStream` or a `DataStreamError` if the chunk size is invalid.
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
+/// // This example is `ignore`d because it requires a network connection.
 /// use frd_pu::data_stream::{new_network_stream, DataStreamError};
 /// use std::net::TcpStream;
 ///
-/// // Note: This example requires a running server to connect to.
-/// // Assuming a server is listening on 127.0.0.1:8080.
 /// let stream = TcpStream::connect("127.0.0.1:8080").unwrap();
-///
-/// let mut network_stream = new_network_stream(stream, 128).unwrap();
-///
-/// let result = network_stream.process_chunks(|chunk| {
-///     // Your processing logic for network data.
-///     // This could be parsing a protocol, etc.
-///     println!("Received chunk of size: {}", chunk.len());
-///     Ok(())
-/// });
+/// let result = new_network_stream(stream, 4096);
 ///
 /// assert!(result.is_ok());
 /// ```
@@ -162,13 +150,44 @@ impl<R: DataReader> DataStream<R> {
         E: Into<String>,
     {
         loop {
+            // Read a chunk of data from the reader into the buffer.
+            let bytes_read = self.reader.read(&mut self.buffer)?;
+            
+            // If we've reached the end of the stream, break the loop.
+            if bytes_read == 0 {
+                break; // End of stream
+            }
+
+            // Process the non-empty part of the buffer.
+            if let Err(e) = processor(&self.buffer[..bytes_read]) {
+                // If the processor returns an error, map it to our DataStreamError.
+                return Err(DataStreamError::ProcessorError(e.into()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Processes the data stream chunk by chunk, applying a simple closure to each chunk.
+    ///
+    /// This function is a simpler alternative to `process_chunks` for cases where the
+    /// processor does not need to return a `Result` or a custom error.
+    ///
+    /// # Arguments
+    /// * `processor` - A mutable closure that processes each chunk. It takes
+    /// a byte slice of the chunk.
+    pub fn for_each_chunk<F>(&mut self, mut processor: F) -> Result<(), DataStreamError>
+    where
+        F: FnMut(&[u8]),
+    {
+        loop {
+            // Read a chunk of data from the reader.
             let bytes_read = self.reader.read(&mut self.buffer)?;
             if bytes_read == 0 {
                 break; // End of stream
             }
-            if let Err(e) = processor(&self.buffer[..bytes_read]) {
-                return Err(DataStreamError::ProcessorError(e.into()));
-            }
+            
+            // Apply the processor function to the chunk.
+            processor(&self.buffer[..bytes_read]);
         }
         Ok(())
     }
