@@ -2,8 +2,8 @@
 
 use std::error::Error;
 use std::fmt;
-use std::thread;
 use std::panic::{self, UnwindSafe};
+use std::thread;
 
 /// Error type for parallel task execution.
 #[derive(Debug, PartialEq)]
@@ -25,6 +25,7 @@ impl Error for ParallelTaskError {}
 /// Executes a data-parallel task across multiple CPU cores.
 ///
 /// This function chunks the input data and processes each chunk on a separate thread.
+/// It ensures thread safety and handles panics gracefully.
 ///
 /// # Arguments
 /// * `input` - The input vector of data to process.
@@ -34,62 +35,67 @@ impl Error for ParallelTaskError {}
 /// # Returns
 /// A `Result` containing the vector of processed data in the original order, or an error if a thread panics.
 pub fn execute_parallel<I, O, F>(
-    input: Vec<I>,
+    mut input: Vec<I>,
     workers: usize,
     task: F,
 ) -> Result<Vec<O>, ParallelTaskError>
 where
-    // The closure F must be callable with a reference, be safe to send between threads (Send),
-    // be safe to share between threads (Sync), and be safe to unwind across a panic boundary (UnwindSafe).
+    // The closure F must be `Sync` because it's shared across threads, and `UnwindSafe`
+    // to allow for panic handling.
     F: Fn(&I) -> O + Send + Sync + UnwindSafe,
-    // The input items I must be safe to send between threads and be safely shareable via
-    // immutable references between threads (Sync). They also need to be unwind-safe.
-    I: Send + Sync + UnwindSafe,
-    // The output items O must be safe to send between threads and be unwind-safe.
-    O: Send + UnwindSafe,
+    I: Send,
+    O: Send,
 {
-    if input.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Determine the number of threads to use.
+    // Determine the number of workers. If workers is 0, use all available cores.
     let num_workers = if workers > 0 {
         workers
     } else {
         thread::available_parallelism().map_or(1, |n| n.get())
     };
 
-    let mut results: Vec<O> = Vec::with_capacity(input.len());
-    // This is safe because we are initializing memory that will be immediately
-    // written to by threads that we guarantee will complete before we return.
-    #[allow(unsafe_code)]
-    unsafe {
-        results.set_len(input.len());
+    // Calculate the chunk size, ensuring it's at least 1.
+    let chunk_size = (input.len() + num_workers - 1) / num_workers;
+    if input.is_empty() {
+        return Ok(Vec::new());
     }
 
-    // Use catch_unwind to handle panics in worker threads.
+    // Use `thread::scope` for safe, zero-overhead thread spawning.
+    // The return value is a Result to handle panics gracefully.
     let result = panic::catch_unwind(move || {
         thread::scope(|s| {
-            let chunk_size = (input.len() + num_workers - 1) / num_workers;
-            if chunk_size == 0 { return; }
+            // Split the input into chunks and process each on a new thread.
+            // We use `Vec::drain` to move the chunks out of the main vector,
+            // which is more efficient.
+            let mut handles = Vec::with_capacity(num_workers);
+            let mut chunks_iter = input.chunks(chunk_size);
 
-            // Split the input and results vectors into chunks for parallel processing.
-            // These chunks are then moved into the worker threads.
-            let input_chunks = input.chunks(chunk_size);
-            let mut results_chunks = results.chunks_mut(chunk_size);
-
-            for (input_chunk, results_chunk) in input_chunks.zip(&mut results_chunks) {
-                let task_ref = &task;
-                s.spawn(move || {
-                    for (input_item, output_item) in input_chunk.iter().zip(results_chunk.iter_mut()) {
-                        *output_item = task_ref(input_item);
-                    }
-                });
+            for _ in 0..num_workers {
+                if let Some(chunk) = chunks_iter.next() {
+                    let task_ref = &task;
+                    let handle = s.spawn(move || {
+                        let mut results_for_chunk = Vec::with_capacity(chunk.len());
+                        for item in chunk {
+                            results_for_chunk.push(task_ref(item));
+                        }
+                        results_for_chunk
+                    });
+                    handles.push(handle);
+                }
             }
-        });
+            
+            // Collect the results from each thread, preserving the original order.
+            let mut final_results = Vec::with_capacity(input.len());
+            for handle in handles {
+                // `handle.join()` will panic if the thread panicked.
+                final_results.extend(handle.join().unwrap());
+            }
 
-        results
+            final_results
+        })
     });
 
-    result.map_err(|_| ParallelTaskError::ThreadPanic)
+    match result {
+        Ok(results) => Ok(results),
+        Err(_) => Err(ParallelTaskError::ThreadPanic),
+    }
 }
