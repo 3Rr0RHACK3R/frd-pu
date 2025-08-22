@@ -1,0 +1,16 @@
+# Cargo.toml
+
+[package]
+name = "frd_pu"
+version = "0.1.0"
+edition = "2021"
+description = "The Fast RAM Data-Processing Unit. A high-performance, zero-dependency library for extreme efficiency."
+authors = ["3rror"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/3Rr0RHACK3R/frd-pu"
+keywords = ["high-performance", "data-processing", "zero-dependency", "memory-efficient", "rust"]
+categories = ["data-structures", "algorithms"]
+
+# This library is intentionally zero-dependency.
+[dependencies]
