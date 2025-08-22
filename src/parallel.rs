@@ -4,7 +4,6 @@ use std::error::Error;
 use std::fmt;
 use std::thread;
 use std::panic::{self, UnwindSafe};
-use std::marker::PhantomData; // Required for generic type UnwindSafe bound
 
 /// Error type for parallel task execution.
 #[derive(Debug, PartialEq)]
@@ -67,12 +66,6 @@ where
     unsafe {
         results.set_len(input.len());
     }
-
-    // The `PhantomData` fields are used to satisfy the `UnwindSafe`
-    // trait bounds for `I` and `O`. Since `Vec<I>` and `Vec<O>` are
-    // moved into the closure, they must be `UnwindSafe`.
-    let input_phantom = PhantomData::<I>;
-    let results_phantom = PhantomData::<O>;
 
     // Use catch_unwind to handle panics in worker threads.
     let result = panic::catch_unwind(move || {

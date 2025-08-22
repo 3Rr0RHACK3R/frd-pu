@@ -86,3 +86,8 @@ impl FileStream {
         Ok(())
     }
 }
+
+/// A convenience function to create a new `FileStream`.
+pub fn new_file_stream<P: AsRef<Path>>(path: P, chunk_size: usize) -> Result<FileStream, FileStreamError> {
+    FileStream::new(path, chunk_size)
+}
