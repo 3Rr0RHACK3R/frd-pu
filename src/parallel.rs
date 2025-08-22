@@ -3,6 +3,8 @@
 use std::error::Error;
 use std::fmt;
 use std::thread;
+use std::panic::{self, UnwindSafe};
+use std::marker::PhantomData; // Required for generic type UnwindSafe bound
 
 /// Error type for parallel task execution.
 #[derive(Debug, PartialEq)]
@@ -38,9 +40,14 @@ pub fn execute_parallel<I, O, F>(
     task: F,
 ) -> Result<Vec<O>, ParallelTaskError>
 where
-    F: Fn(&I) -> O + Send + Sync,
-    I: Send,
-    O: Send,
+    // The closure F must be callable with a reference, be safe to send between threads (Send),
+    // be safe to share between threads (Sync), and be safe to unwind across a panic boundary (UnwindSafe).
+    F: Fn(&I) -> O + Send + Sync + UnwindSafe,
+    // The input items I must be safe to send between threads and be safely shareable via
+    // immutable references between threads (Sync). They also need to be unwind-safe.
+    I: Send + Sync + UnwindSafe,
+    // The output items O must be safe to send between threads and be unwind-safe.
+    O: Send + UnwindSafe,
 {
     if input.is_empty() {
         return Ok(Vec::new());
@@ -61,12 +68,20 @@ where
         results.set_len(input.len());
     }
 
+    // The `PhantomData` fields are used to satisfy the `UnwindSafe`
+    // trait bounds for `I` and `O`. Since `Vec<I>` and `Vec<O>` are
+    // moved into the closure, they must be `UnwindSafe`.
+    let input_phantom = PhantomData::<I>;
+    let results_phantom = PhantomData::<O>;
+
     // Use catch_unwind to handle panics in worker threads.
-    let result = std::panic::catch_unwind(move || {
+    let result = panic::catch_unwind(move || {
         thread::scope(|s| {
             let chunk_size = (input.len() + num_workers - 1) / num_workers;
             if chunk_size == 0 { return; }
 
+            // Split the input and results vectors into chunks for parallel processing.
+            // These chunks are then moved into the worker threads.
             let input_chunks = input.chunks(chunk_size);
             let mut results_chunks = results.chunks_mut(chunk_size);
 
@@ -79,6 +94,7 @@ where
                 });
             }
         });
+
         results
     });
 
