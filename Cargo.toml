@@ -2,14 +2,14 @@
 
 [package]
 name = "frd_pu"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "The Fast RAM Data-Processing Unit. A high-performance, zero-dependency library for extreme efficiency."
 authors = ["3rror"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/3Rr0RHACK3R/frd-pu"
-keywords = ["high-performance", "data-processing", "zero-dependency", "memory-efficient", "rust"]
+keywords = ["high-performance", "data-processing", "zero-dependency", "memory-efficient", "rust", "universal-p"]
 categories = ["data-structures", "algorithms"]
 
 # This library is intentionally zero-dependency.
