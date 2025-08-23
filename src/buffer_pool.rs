@@ -14,7 +14,7 @@
 //! * **Memory-efficient** - Returns memory to system when pools shrink
 //! * **Fast access** - O(1) buffer acquisition and release
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::VecDeque;
 use std::fmt;
 
@@ -305,8 +305,7 @@ impl Clone for BufferPool {
 }
 
 // Thread-safe global buffer pools for common sizes
-static mut GLOBAL_POOLS: Option<GlobalPools> = None;
-static INIT_GLOBAL: std::sync::Once = std::sync::Once::new();
+static GLOBAL_POOLS: OnceLock<GlobalPools> = OnceLock::new();
 
 struct GlobalPools {
     small_pool: BufferPool,    // 1KB buffers
@@ -314,19 +313,14 @@ struct GlobalPools {
     large_pool: BufferPool,    // 1MB buffers
 }
 
-fn init_global_pools() {
-    unsafe {
-        GLOBAL_POOLS = Some(GlobalPools {
+fn get_global_pools() -> &'static GlobalPools {
+    GLOBAL_POOLS.get_or_init(|| {
+        GlobalPools {
             small_pool: BufferPool::with_max_buffers(128),
             medium_pool: BufferPool::with_max_buffers(64),
             large_pool: BufferPool::with_max_buffers(32),
-        });
-    }
-}
-
-fn get_global_pools() -> &'static GlobalPools {
-    INIT_GLOBAL.call_once(init_global_pools);
-    unsafe { GLOBAL_POOLS.as_ref().unwrap() }
+        }
+    })
 }
 
 /// Get a small buffer (1KB) from the global pool
