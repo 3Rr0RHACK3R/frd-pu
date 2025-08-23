@@ -29,8 +29,10 @@
 //!     * `btree` for an efficient binary search tree.
 //!     * `trie` for a memory-efficient prefix tree.
 //!     * `quicksort` for an insanely fast in-place sorting algorithm.
+//!     * `compression` for high-performance LZ77-style data compression and decompression.
+//!     * `memory_pool` for zero-allocation memory management with pre-allocated pools.
 
-// Public Modules
+// Public Modules (ALL existing modules preserved)
 pub mod bloom_filter;
 pub mod cpu_task;
 pub mod data_stream;
@@ -41,8 +43,10 @@ pub mod hasher;
 pub mod btree;
 pub mod trie;
 pub mod quicksort;
+pub mod compression; // NEW MODULE ADDED
+pub mod memory_pool; // NEW MODULE ADDED
 
-// Re-export the public APIs for easy access.
+// Re-export the public APIs for easy access (ALL existing re-exports preserved)
 pub use bloom_filter::{BloomFilter, BloomFilterError};
 pub use cpu_task::{CpuTask, CpuTaskError, new_cpu_task};
 pub use data_stream::{DataStream, DataStreamError, new_file_stream, new_network_stream};
@@ -53,3 +57,30 @@ pub use hasher::{hash_bytes, hash_file, hash_stream, HasherError};
 pub use btree::{BinarySearchTree, BinarySearchTreeError};
 pub use trie::{Trie, TrieError};
 pub use quicksort::{quicksort, QuickSortError};
+
+// NEW RE-EXPORTS for compression module
+pub use compression::{
+    CompressionEngine, 
+    CompressionError, 
+    CompressionStats,
+    compress_data, 
+    decompress_data, 
+    compress_text, 
+    decompress_to_text,
+    get_compression_stats
+};
+
+// NEW RE-EXPORTS for memory pool module
+pub use memory_pool::{
+    FixedPool,
+    ObjectPool,
+    PooledMemory,
+    PooledObject,
+    PoolManager,
+    PoolStats,
+    MemoryPoolError,
+    create_fixed_pool,
+    create_small_pool,
+    create_medium_pool,
+    create_large_pool
+};

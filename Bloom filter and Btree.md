@@ -1,5 +1,3 @@
-FRD-PU: Version 2.0 - Data Structures
-This document provides an overview of the new, highly-optimized data structures introduced in Version 2.0 of the FRD-PU library. These additions, built with our core philosophy of efficiency and zero dependencies, are designed to solve complex computational problems with minimal memory and processing overhead.
 
 BloomFilter
 The BloomFilter module introduces a space-efficient, probabilistic data structure used to test whether an element is a member of a set. It offers a significant memory advantage over traditional hash sets but comes with the trade-off of a small chance of false positives. It guarantees no false negatives.
