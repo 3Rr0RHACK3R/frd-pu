@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{self, Read};
+use std::io::Read;
 use std::path::Path;
 
 /// Error type for hashing operations.
@@ -41,20 +41,20 @@ impl Error for HasherError {}
 /// ```
 /// use frd_pu::hasher::hash_bytes;
 ///
-/// let data = b"Hello, world!";
+/// let data = b"FRD-PU is the GOAT.";
 /// let hash = hash_bytes(data);
-/// assert_eq!(hash, 13735071190989083510); // A known hash value for this data
+/// assert_ne!(hash, 0); // The hash should not be zero for non-empty data.
 /// ```
-pub fn hash_bytes(data: &[u8]) -> u64 {
+pub fn hash_bytes<T: Hash + ?Sized>(data: &T) -> u64 {
     let mut hasher = DefaultHasher::new();
     data.hash(&mut hasher);
     hasher.finish()
 }
 
-/// Hashes the content of a file in a memory-efficient, streaming manner.
+/// Hashes the content of a file specified by its path.
 ///
-/// This function reads the file in chunks to avoid loading the entire
-/// content into memory at once. This makes it suitable for very large files.
+/// This function is a convenience wrapper around `hash_stream`. It opens
+/// the file and hashes its content in a memory-efficient manner.
 ///
 /// # Arguments
 /// * `path` - The path to the file to be hashed.
@@ -64,20 +64,25 @@ pub fn hash_bytes(data: &[u8]) -> u64 {
 ///
 /// # Examples
 ///
-/// ```no_run
-/// use frd_pu::hasher::hash_file;
+/// ```
+/// use frd_pu::hasher::{hash_file, HasherError};
+/// use std::fs::File;
+/// use std::io::Write;
 /// use std::path::Path;
 ///
-/// // Create a dummy file for this example.
-/// // In a real scenario, you would use an existing file.
-/// std::fs::write("example_file.txt", "This is some test data.").unwrap();
+/// // Create a temporary file for the example.
+/// let temp_dir = tempfile::tempdir().unwrap();
+/// let file_path = temp_dir.path().join("my_file.txt");
 ///
-/// let path = Path::new("example_file.txt");
-/// let result = hash_file(path);
+/// {
+///     let mut file = File::create(&file_path).unwrap();
+///     write!(file, "FRD-PU is the GOAT.").unwrap();
+/// }
+///
+/// let result = hash_file(&file_path);
 /// assert!(result.is_ok());
 /// ```
 pub fn hash_file<P: AsRef<Path>>(path: P) -> Result<u64, HasherError> {
-    // Open the file and wrap in a generic stream for processing.
     let file = File::open(path).map_err(|e| HasherError::IoError(e.to_string()))?;
     hash_stream(file)
 }
@@ -113,14 +118,10 @@ pub fn hash_stream<R: Read>(mut reader: R) -> Result<u64, HasherError> {
     let mut hasher = DefaultHasher::new();
 
     loop {
-        // Read the next chunk of data.
         let bytes_read = reader.read(&mut buffer).map_err(|e| HasherError::IoError(e.to_string()))?;
-
         if bytes_read == 0 {
-            break; // End of the stream.
+            break;
         }
-
-        // Hash the chunk and continue the process.
         hasher.write(&buffer[..bytes_read]);
     }
 

@@ -4,6 +4,8 @@ use std::error::Error;
 use std::fmt;
 use std::panic::{self, UnwindSafe};
 use std::thread;
+use std::sync::Arc;
+use std::marker::Send;
 
 /// Error type for parallel task execution.
 #[derive(Debug, PartialEq)]
@@ -40,27 +42,21 @@ pub fn execute_parallel<I, O, F>(
     task: F,
 ) -> Result<Vec<O>, ParallelTaskError>
 where
-    // The closure F must be `Sync` because it's shared across threads, and `UnwindSafe`
-    // to allow for panic handling.
-    F: Fn(&I) -> O + Send + Sync + UnwindSafe,
-    I: Send,
+    I: Send + Sync + UnwindSafe,
     O: Send,
+    F: Fn(&I) -> O + Send + Sync + UnwindSafe + 'static,
 {
-    // Determine the number of workers. If workers is 0, use all available cores.
-    let num_workers = if workers > 0 {
-        workers
+    // Determine the number of workers.
+    let num_workers = if workers == 0 {
+        thread::available_parallelism().map_or(1, |p| p.get())
     } else {
-        thread::available_parallelism().map_or(1, |n| n.get())
+        workers
     };
 
-    // Calculate the chunk size, ensuring it's at least 1.
+    // Calculate the chunk size.
     let chunk_size = (input.len() + num_workers - 1) / num_workers;
-    if input.is_empty() {
-        return Ok(Vec::new());
-    }
 
-    // Use `thread::scope` for safe, zero-overhead thread spawning.
-    // The return value is a Result to handle panics gracefully.
+    // Use `catch_unwind` to gracefully handle panics from worker threads.
     let result = panic::catch_unwind(move || {
         thread::scope(|s| {
             // Split the input into chunks and process each on a new thread.

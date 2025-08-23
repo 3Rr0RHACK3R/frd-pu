@@ -2,7 +2,6 @@
 
 use std::error::Error;
 use std::fmt;
-use std::mem;
 
 /// Error type for QuickSort operations.
 #[derive(Debug, PartialEq)]
@@ -45,24 +44,18 @@ pub fn quicksort<T: PartialOrd>(slice: &mut [T]) -> Result<(), QuickSortError> {
     if slice.is_empty() {
         return Err(QuickSortError::EmptySlice);
     }
-    // Call the internal, recursive function.
     quicksort_recursive(slice, 0, (slice.len() - 1) as isize);
     Ok(())
 }
 
-/// The main recursive function for QuickSort.
-///
-/// This function is where the core logic of the QuickSort algorithm resides. It
-/// partitions the slice and recursively calls itself on the sub-slices.
+/// The recursive core of the QuickSort algorithm.
 ///
 /// # Arguments
-/// * `slice` - The mutable slice of data to be sorted.
-/// * `low` - The lower index of the current sub-slice.
-/// * `high` - The upper index of the current sub-slice.
+/// * `slice` - The mutable slice to be sorted.
+/// * `low` - The starting index of the sub-array.
+/// * `high` - The ending index of the sub-array.
 fn quicksort_recursive<T: PartialOrd>(slice: &mut [T], low: isize, high: isize) {
-    // If the low index is less than the high index, there's at least one element to sort.
     if low < high {
-        // Find the pivot and partition the array.
         let pivot_index = partition(slice, low, high);
 
         // Recursively sort the sub-array before the pivot.
@@ -100,10 +93,7 @@ fn partition<T: PartialOrd>(slice: &mut [T], low: isize, high: isize) -> isize {
         }
     }
 
-    // Swap the pivot element with the element at `i + 1`.
+    // Move the pivot to its final sorted position.
     slice.swap((i + 1) as usize, pivot_index);
-
-    // Return the final position of the pivot.
     i + 1
 }
-

@@ -1,3 +1,5 @@
+// src/lib.rs
+
 //! # FRD-PU: The Fast RAM Data-Processing Unit
 //!
 //! A high-performance, zero-dependency library built from the ground up for extreme efficiency.
@@ -48,6 +50,6 @@ pub use parallel::{execute_parallel, ParallelTaskError};
 pub use cache::{LruCache, CacheError};
 pub use concurrent::{ConcurrentList, ConcurrentListError};
 pub use hasher::{hash_bytes, hash_file, hash_stream, HasherError};
-pub use btree::{BTree, BTreeError};
+pub use btree::{BinarySearchTree, BinarySearchTreeError};
 pub use trie::{Trie, TrieError};
 pub use quicksort::{quicksort, QuickSortError};

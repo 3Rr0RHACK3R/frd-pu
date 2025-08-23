@@ -1,9 +1,10 @@
 // src/concurrent.rs
 
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Mutex;
 use std::error::Error;
 use std::fmt;
+use std::clone::Clone;
 
 /// Error type for concurrent list operations.
 #[derive(Debug, PartialEq)]
@@ -42,32 +43,35 @@ impl Error for ConcurrentListError {}
 ///
 /// // Create a new thread-safe list.
 /// let list = Arc::new(ConcurrentList::new());
+///
 /// let mut handles = vec![];
 ///
-/// // Spawn 10 threads to push items concurrently.
 /// for i in 0..10 {
 ///     let list_clone = Arc::clone(&list);
 ///     let handle = thread::spawn(move || {
+///         // Push a number into the list.
 ///         list_clone.push(i).unwrap();
 ///     });
 ///     handles.push(handle);
 /// }
 ///
-/// // Wait for all threads to finish.
 /// for handle in handles {
 ///     handle.join().unwrap();
 /// }
 ///
-/// // Check the final state of the list.
-/// let final_list_len = list.len().unwrap();
-/// println!("Final list length: {}", final_list_len);
-/// assert_eq!(final_list_len, 10);
+/// // Check the length of the list.
+/// assert_eq!(list.len().unwrap(), 10);
+///
+/// // Retrieve the first item.
+/// let item = list.get(0).unwrap();
+/// assert!(item.is_some());
 /// ```
+#[derive(Debug, Default)]
 pub struct ConcurrentList<T> {
     inner: Mutex<Vec<T>>,
 }
 
-impl<T: Debug> ConcurrentList<T> {
+impl<T> ConcurrentList<T> {
     /// Creates a new, empty `ConcurrentList`.
     pub fn new() -> Self {
         ConcurrentList {
@@ -75,10 +79,10 @@ impl<T: Debug> ConcurrentList<T> {
         }
     }
 
-    /// Appends an item to the end of the list in a thread-safe manner.
+    /// Pushes an item to the end of the list in a thread-safe manner.
     ///
     /// # Arguments
-    /// * `item` - The item to be added to the list.
+    /// * `item` - The item to push.
     ///
     /// # Returns
     /// A `Result` indicating success or a `ConcurrentListError` if the lock failed.
@@ -88,10 +92,10 @@ impl<T: Debug> ConcurrentList<T> {
         Ok(())
     }
 
-    /// Removes and returns the last item from the list in a thread-safe manner.
+    /// Pops the last item from the list in a thread-safe manner.
     ///
     /// # Returns
-    /// A `Result` containing an `Option` with the removed item, or an error if the lock failed.
+    /// A `Result` containing an `Option` with the item, or an error if the lock failed.
     pub fn pop(&self) -> Result<Option<T>, ConcurrentListError> {
         let mut list = self.inner.lock().map_err(|_| ConcurrentListError::LockAcquisitionError)?;
         Ok(list.pop())
@@ -104,7 +108,7 @@ impl<T: Debug> ConcurrentList<T> {
     ///
     /// # Returns
     /// A `Result` containing an `Option` with a reference to the item, or an error if the lock failed.
-    pub fn get(&self, index: usize) -> Result<Option<T>, ConcurrentListError> {
+    pub fn get(&self, index: usize) -> Result<Option<T>, ConcurrentListError> where T: Clone {
         let list = self.inner.lock().map_err(|_| ConcurrentListError::LockAcquisitionError)?;
         Ok(list.get(index).cloned())
     }

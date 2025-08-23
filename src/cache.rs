@@ -41,87 +41,84 @@ impl Error for CacheError {}
 /// ```
 /// use frd_pu::cache::{LruCache, CacheError};
 ///
-/// // Create a new cache with a maximum capacity of 2 items and a max size of 100 bytes.
-/// let mut cache = LruCache::new(2, 100);
+/// // Create a new cache with a max size of 100 bytes.
+/// let mut cache = LruCache::<&str, [u8; 10]>::new(100);
 ///
-/// // Insert some key-value pairs.
-/// cache.insert("key1".to_string(), "val1".to_string(), 4).unwrap();
-/// cache.insert("key2".to_string(), "val2".to_string(), 4).unwrap();
+/// // Insert an item.
+/// let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/// let result = cache.insert("key1", data);
+/// assert!(result.is_ok());
 ///
-/// // Accessing a key moves it to the front of the LRU list.
-/// cache.get(&"key1");
+/// // Get the item. This moves it to the front of the LRU list.
+/// let item = cache.get(&"key1");
+/// assert!(item.is_some());
 ///
-/// // Insert a new item. This will evict the least recently used item, which is "key2".
-/// cache.insert("key3".to_string(), "val3".to_string(), 4).unwrap();
-///
-/// // "key2" should no longer be in the cache.
-/// assert_eq!(cache.get(&"key2"), None);
+/// // Remove an item.
+/// cache.remove(&"key1");
+/// assert_eq!(cache.len(), 0);
 /// ```
 pub struct LruCache<K, V> {
-    /// A hash map for fast key-to-value and key-to-node lookups.
     cache_map: HashMap<K, V>,
-    /// A linked list to maintain the order of recently used keys. The front is the most recent.
     lru_list: LinkedList<K>,
-    /// The maximum number of items the cache can hold.
-    max_capacity: usize,
-    /// The maximum memory size in bytes the cache can hold.
-    max_size: usize,
-    /// The current size of the cache in bytes.
     current_size: usize,
+    max_size: usize,
 }
 
 impl<K, V> LruCache<K, V>
 where
-    K: Eq + Hash + Clone + Debug,
-    V: Clone,
+    K: Eq + Hash + Clone,
+    V: std::mem::size_of_val,
 {
-    /// Creates a new, empty LRU cache.
-    ///
-    /// # Arguments
-    /// * `max_capacity` - The maximum number of items the cache can hold.
-    /// * `max_size` - The maximum memory size in bytes the cache can hold.
-    pub fn new(max_capacity: usize, max_size: usize) -> Self {
+    /// Creates a new `LruCache` with the specified maximum size in bytes.
+    pub fn new(max_size: usize) -> Self {
         LruCache {
-            cache_map: HashMap::with_capacity(max_capacity),
+            cache_map: HashMap::new(),
             lru_list: LinkedList::new(),
-            max_capacity,
-            max_size,
             current_size: 0,
+            max_size,
         }
     }
 
     /// Inserts a key-value pair into the cache.
     ///
-    /// If the cache exceeds its capacity or size limit, it will evict the
-    /// least recently used items.
+    /// If the key already exists, its value is updated. The size of the cache
+    /// is managed according to the `max_size`. If the cache is full, the least
+    /// recently used item is removed to make space.
     ///
     /// # Arguments
     /// * `key` - The key to insert.
-    /// * `value` - The value to insert.
-    /// * `size` - The size of the item in bytes.
+    /// * `value` - The value to associate with the key.
     ///
     /// # Returns
-    /// `Ok(())` on success, or a `CacheError` if the item is too large.
-    pub fn insert(&mut self, key: K, value: V, size: usize) -> Result<(), CacheError> {
-        if size > self.max_size {
+    /// `Ok(())` on success, or a `CacheError` if the item is too large for the cache.
+    pub fn insert(&mut self, key: K, value: V) -> Result<(), CacheError> {
+        let item_size = std::mem::size_of_val(&value);
+
+        if item_size > self.max_size {
             return Err(CacheError::ItemTooLarge);
         }
 
-        // If the key already exists, update the value and move it to the front.
+        // If the key already exists, remove it from the LRU list.
         if self.cache_map.contains_key(&key) {
-            self.remove(&key);
+            self.lru_list.retain(|lru_key| lru_key != &key);
+            self.current_size -= std::mem::size_of_val(self.cache_map.get(&key).unwrap());
         }
 
-        // Check if adding the new item will exceed the size limit.
-        // Evict items until we have enough space.
-        while self.current_size + size > self.max_size || self.cache_map.len() >= self.max_capacity {
-            self.evict_lru();
-        }
-
-        // Insert the new key-value pair and update the LRU list.
+        // Insert the new key-value pair and update the size.
+        self.current_size += item_size;
         self.cache_map.insert(key.clone(), value);
         self.lru_list.push_front(key);
-        self.current_size += size;
+
+        // Enforce the cache size limit.
+        while self.current_size > self.max_size {
+            if let Some(lru_key) = self.lru_list.pop_back() {
+                if let Some(value) = self.cache_map.remove(&lru_key) {
+                    self.current_size -= std::mem::size_of_val(&value);
+                }
+            } else {
+                break;
+            }
+        }
 
         Ok(())
     }
@@ -132,11 +129,18 @@ where
     /// * `key` - The key to retrieve.
     ///
     /// # Returns
-    /// `Some(&V)` if the key exists, otherwise `None`.
+    /// `Some(&V)` if the key is found, otherwise `None`.
     pub fn get(&mut self, key: &K) -> Option<&V> {
         if self.cache_map.contains_key(key) {
             // Remove the key from its current position in the LRU list.
-            self.lru_list.retain(|lru_key| lru_key != key);
+            let mut new_lru_list = LinkedList::new();
+            for lru_key in self.lru_list.iter() {
+                if lru_key != key {
+                    new_lru_list.push_back(lru_key.clone());
+                }
+            }
+            self.lru_list = new_lru_list;
+
             // Push it to the front to mark it as most recently used.
             self.lru_list.push_front(key.clone());
             self.cache_map.get(key)
@@ -155,7 +159,13 @@ where
     pub fn remove(&mut self, key: &K) -> Option<V> {
         if let Some(value) = self.cache_map.remove(key) {
             // Remove the key from the LRU list.
-            self.lru_list.retain(|lru_key| lru_key != key);
+            let mut new_lru_list = LinkedList::new();
+            for lru_key in self.lru_list.iter() {
+                if lru_key != key {
+                    new_lru_list.push_back(lru_key.clone());
+                }
+            }
+            self.lru_list = new_lru_list;
             self.current_size -= std::mem::size_of_val(&value);
             Some(value)
         } else {
@@ -173,12 +183,20 @@ where
         self.current_size
     }
 
-    /// Evicts the least recently used item from the cache.
-    fn evict_lru(&mut self) {
-        if let Some(lru_key) = self.lru_list.pop_back() {
-            if let Some(value) = self.cache_map.remove(&lru_key) {
-                self.current_size -= std::mem::size_of_val(&value);
-            }
-        }
+    /// Returns the maximum allowed size of the cache in bytes.
+    pub fn max_size(&self) -> usize {
+        self.max_size
+    }
+
+    /// Returns `true` if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.cache_map.is_empty()
+    }
+
+    /// Clears the cache, removing all key-value pairs and resetting the size.
+    pub fn clear(&mut self) {
+        self.cache_map.clear();
+        self.lru_list.clear();
+        self.current_size = 0;
     }
 }

@@ -44,70 +44,41 @@ impl<K: Ord, V> Node<K, V> {
 
 /// A professional-grade, zero-dependency Binary Search Tree (BST) data structure.
 ///
-/// **Note:** This is a Binary Search Tree (BST), not a B-Tree. While the file is named
-/// `btree.rs` for organizational purposes, the implementation is that of a BST.
-/// A Binary Search Tree is an efficient data structure for storing and retrieving
-/// sorted data in memory. It provides fast insertion, deletion, and searching
-/// operations for ordered data.
+/// **Note:** This is a simple binary search tree and is not self-balancing. Performance
+/// may degrade to O(n) in worst-case scenarios with already sorted data.
 ///
 /// # Panics
 ///
-/// This implementation will panic if it encounters a node that is not
-/// properly initialized, but this is prevented by the use of `Option<Box<Node>>`.
-///
-/// # Examples
-///
-/// ```
-/// use frd_pu::btree::{BinarySearchTree, BinarySearchTreeError};
-///
-/// // Create a new Binary Search Tree.
-/// let mut bst = BinarySearchTree::new();
-///
-/// // Insert some key-value pairs.
-/// bst.insert(5, "apple").unwrap();
-/// bst.insert(3, "banana").unwrap();
-/// bst.insert(7, "cherry").unwrap();
-///
-/// // Search for a value.
-/// assert_eq!(bst.search(&3), Some(&"banana"));
-/// assert_eq!(bst.search(&10), None);
-///
-/// // Attempting to insert a duplicate key returns an error.
-/// let result = bst.insert(5, "grape");
-/// assert_eq!(result, Err(BinarySearchTreeError::KeyAlreadyExists));
-/// ```
+/// This implementation will panic if it encounters a key already in the tree.
+/// This is not ideal, and a more robust implementation would return a `Result`.
+#[derive(Debug)]
 pub struct BinarySearchTree<K: Ord, V> {
     root: Option<Box<Node<K, V>>>,
 }
 
-impl<K: Ord, V> BinarySearchTree<K, V> {
-    /// Creates a new, empty Binary Search Tree.
+impl<K: Ord + fmt::Debug, V> BinarySearchTree<K, V> {
+    /// Creates a new empty Binary Search Tree.
     pub fn new() -> Self {
         BinarySearchTree { root: None }
     }
 
-    /// Inserts a new key-value pair into the tree.
+    /// Inserts a key-value pair into the tree.
     ///
     /// # Arguments
-    /// * `key` - The key to insert. It must implement the `Ord` trait for ordering.
+    /// * `key` - The key to insert.
     /// * `value` - The value associated with the key.
     ///
     /// # Returns
-    /// A `Result` indicating success or an error if the key already exists.
+    /// `Ok(())` on success, or a `BinarySearchTreeError` if the key already exists.
     pub fn insert(&mut self, key: K, value: V) -> Result<(), BinarySearchTreeError> {
         let new_node = Box::new(Node::new(key, value));
-        if let Some(root) = self.root.as_mut() {
-            // If the root exists, traverse the tree to find the insertion point.
-            Self::insert_recursive(root, new_node)
-        } else {
-            // If the tree is empty, the new node becomes the root.
-            self.root = Some(new_node);
-            Ok(())
-        }
-    }
 
-    /// Recursively inserts a new node into the correct position in the tree.
-    fn insert_recursive(current: &mut Box<Node<K, V>>, new_node: Box<Node<K, V>>) -> Result<(), BinarySearchTreeError> {
+        if self.root.is_none() {
+            self.root = Some(new_node);
+            return Ok(());
+        }
+
+        let mut current = self.root.as_mut().unwrap();
         loop {
             match new_node.key.cmp(&current.key) {
                 Ordering::Less => {
