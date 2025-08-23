@@ -13,7 +13,6 @@
 //! * Fast compression and decompression
 //! * Thread-safe operations
 
-use std::collections::HashMap;
 use std::fmt;
 
 /// Maximum lookback window size for LZ77 compression
