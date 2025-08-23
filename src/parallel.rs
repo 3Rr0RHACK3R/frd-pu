@@ -36,7 +36,7 @@ impl Error for ParallelTaskError {}
 /// # Returns
 /// A `Result` containing the vector of processed data in the original order, or an error if a thread panics.
 pub fn execute_parallel<I, O, F>(
-    mut input: Vec<I>,
+    input: Vec<I>,
     workers: usize,
     task: F,
 ) -> Result<Vec<O>, ParallelTaskError>
@@ -62,20 +62,18 @@ where
             // We use `Vec::drain` to move the chunks out of the main vector,
             // which is more efficient.
             let mut handles = Vec::with_capacity(num_workers);
-            let mut chunks_iter = input.chunks(chunk_size);
+            let chunks_iter = input.chunks(chunk_size);
 
-            for _ in 0..num_workers {
-                if let Some(chunk) = chunks_iter.next() {
-                    let task_ref = &task;
-                    let handle = s.spawn(move || {
-                        let mut results_for_chunk = Vec::with_capacity(chunk.len());
-                        for item in chunk {
-                            results_for_chunk.push(task_ref(item));
-                        }
-                        results_for_chunk
-                    });
-                    handles.push(handle);
-                }
+            for chunk in chunks_iter {
+                let task_ref = &task;
+                let handle = s.spawn(move || {
+                    let mut results_for_chunk = Vec::with_capacity(chunk.len());
+                    for item in chunk {
+                        results_for_chunk.push(task_ref(item));
+                    }
+                    results_for_chunk
+                });
+                handles.push(handle);
             }
             
             // Collect the results from each thread, preserving the original order.
