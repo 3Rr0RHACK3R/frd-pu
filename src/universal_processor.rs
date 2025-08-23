@@ -305,7 +305,23 @@ impl UniversalProcessor {
         let processing_strategy = if let Some(cached_pattern) = self.get_cached_pattern(pattern_key) {
             self.create_strategy_from_pattern(&cached_pattern)
         } else {
-            self.create_adaptive_strategy(data_size)
+            // Convert generic slice to byte slice for analysis
+            // This is safe as we are only reading the bytes for statistical analysis
+            let data_bytes = unsafe {
+                std::slice::from_raw_parts(
+                    data.as_ptr() as *const u8,
+                    data_size,
+                )
+            };
+
+            // Analyze, cache, and then create strategy
+            if let Ok(new_pattern) = self.analyze_pattern(data_bytes) {
+                self.cache_pattern(pattern_key, new_pattern.clone());
+                self.create_strategy_from_pattern(&new_pattern)
+            } else {
+                // Fallback if analysis fails
+                self.create_adaptive_strategy(data_size)
+            }
         };
         
         // Execute with chosen strategy
@@ -969,17 +985,18 @@ mod tests {
     #[test]
     fn test_pattern_caching() {
         let processor = UniversalProcessor::new();
-        let data = vec![1u8, 2, 3, 4, 5];
+        let mut data = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]; // Use a vec that can be mutable
         
-        // First analysis should cache the pattern
-        let pattern1 = processor.analyze_pattern(&data).unwrap();
+        // First execution should analyze and cache the pattern
+        processor.execute(&mut data, |_| {}).unwrap();
+        assert_eq!(processor.pattern_cache.read().unwrap().len(), 1);
+
+        // Second execution should use the cached pattern
+        processor.execute(&mut data, |_| {}).unwrap();
+        assert_eq!(processor.pattern_cache.read().unwrap().len(), 1); // Should not add a new entry
         
-        // Second analysis of same data should potentially use cache
-        let pattern2 = processor.analyze_pattern(&data).unwrap();
-        
-        // Both should have valid patterns
-        assert!(pattern1.confidence > 0.0);
-        assert!(pattern2.confidence > 0.0);
+        let stats = processor.stats().unwrap();
+        assert_eq!(stats.total_operations, 2);
     }
     
     #[test]
