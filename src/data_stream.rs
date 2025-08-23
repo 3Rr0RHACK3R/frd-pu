@@ -7,7 +7,7 @@ use std::io::{self, Read};
 use std::net::TcpStream;
 use std::path::Path;
 
-/// A trait for any type that can be read from in a chunked manner.
+/// A professional-grade, zero-dependency trait for any type that can be read from in a chunked manner.
 /// This abstracts over different data sources like files or network streams.
 pub trait DataReader: Read {}
 
@@ -38,70 +38,50 @@ impl fmt::Display for DataStreamError {
         match self {
             DataStreamError::IoError(e) => write!(f, "I/O error during data stream: {}", e),
             DataStreamError::InvalidChunkSize => {
-                write!(f, "Invalid chunk size. Must be greater than 0.")
+                write!(f, "Invalid chunk size provided; must be greater than 0.")
             }
-            DataStreamError::ProcessorError(msg) => write!(f, "Processor error: {}", msg),
+            DataStreamError::ProcessorError(e) => write!(f, "Processor function returned an error: {}", e),
         }
     }
 }
 
-/// A professional-grade, high-performance, and efficient data streaming engine.
+/// A highly optimized data stream processor for files and network streams.
 ///
-/// This structure provides a way to read and process large data streams from
-/// various sources (like files or network connections) in a chunked manner,
-/// ensuring low memory footprint and high throughput.
-///
-/// # Arguments
-///
-/// * `R` - The type of the data source, which must implement the `DataReader` trait.
-///
-/// # Examples
-///
-/// ```
-/// use frd_pu::data_stream::{DataStream, new_file_stream};
-/// use std::fs::File;
-/// use std::io::{self, Cursor};
-///
-/// // Create a dummy file stream. In a real application, you'd open a file.
-/// let data = "This is a test stream of data.";
-/// let dummy_reader = Cursor::new(data.as_bytes());
-///
-/// // Create a new `DataStream` from the dummy reader.
-/// let mut stream = DataStream::new(dummy_reader, 10).unwrap();
-///
-/// // Process the stream, printing each chunk.
-/// stream.for_each_chunk(|chunk| {
-///     println!("Chunk: {:?}", String::from_utf8_lossy(chunk));
-/// }).unwrap();
-/// ```
+/// This structure is designed to be a "zero-copy" processor in the professional sense,
+/// meaning it avoids any unnecessary heap allocations and data copies. It uses a
+/// fixed-size buffer to read data and then hands a reference to that buffer directly
+/// to a processor function. This minimizes memory overhead and maximizes speed,
+/// embodying our core philosophy of "Do more with less."
 pub struct DataStream<R: DataReader> {
     reader: R,
     buffer: Vec<u8>,
 }
 
 impl<R: DataReader> DataStream<R> {
-    /// Creates a new `DataStream` with the specified chunk size.
+    /// Creates a new `DataStream` instance.
     ///
     /// # Arguments
-    /// * `reader` - The underlying data source to read from.
-    /// * `chunk_size` - The size of each data chunk in bytes.
+    /// * `reader` - The data source to stream from (e.g., `File`, `TcpStream`).
+    /// * `chunk_size` - The size of the internal buffer and the chunk to process.
     ///
     /// # Returns
-    /// A `Result` containing the `DataStream` instance or an `InvalidChunkSize` error.
+    /// A `Result` containing a `DataStream` or an `InvalidChunkSize` error.
     pub fn new(reader: R, chunk_size: usize) -> Result<Self, DataStreamError> {
         if chunk_size == 0 {
             return Err(DataStreamError::InvalidChunkSize);
         }
-        Ok(DataStream {
+
+        Ok(Self {
             reader,
             buffer: vec![0; chunk_size],
         })
     }
 
-    /// Processes the data stream chunk by chunk, applying a closure to each chunk.
+    /// Processes the data stream chunk by chunk, applying a closure that can return a `Result`.
     ///
-    /// The processor closure can return a `Result` to signal errors. This is
-    /// ideal for tasks like parsing, compression, or validation.
+    /// This is the core engine for processing data. It reads from the underlying reader
+    /// into its internal buffer and then calls the provided processor with a slice
+    /// of the data read. No additional data copies are made after the initial read.
     ///
     /// # Arguments
     /// * `processor` - A mutable closure that processes each chunk. It takes
@@ -109,20 +89,20 @@ impl<R: DataReader> DataStream<R> {
     pub fn process_chunks<F, E>(&mut self, mut processor: F) -> Result<(), DataStreamError>
     where
         F: FnMut(&[u8]) -> Result<(), E>,
-        E: Into<String>,
+        E: Error + Into<String>,
     {
         loop {
-            // Read a chunk of data from the reader.
+            // Read a chunk of data from the reader into the internal buffer.
             let bytes_read = self.reader.read(&mut self.buffer)?;
             
             // If we've reached the end of the stream, break the loop.
             if bytes_read == 0 {
-                break; // End of stream
+                break;
             }
 
-            // Process the non-empty part of the buffer.
+            // Process the non-empty part of the buffer. This is where we achieve our "zero-copy"
+            // philosophy, as we pass a slice directly to the processor without an extra allocation.
             if let Err(e) = processor(&self.buffer[..bytes_read]) {
-                // If the processor returns an error, map it to our DataStreamError.
                 return Err(DataStreamError::ProcessorError(e.into()));
             }
         }
@@ -131,8 +111,8 @@ impl<R: DataReader> DataStream<R> {
 
     /// Processes the data stream chunk by chunk, applying a simple closure to each chunk.
     ///
-    /// This function is a simpler alternative to `process_chunks` for cases where the
-    /// processor does not need to return a `Result` or a custom error.
+    /// This is a simplified version of `process_chunks` for cases where the processor
+    /// does not need to return a `Result` or a custom error.
     ///
     /// # Arguments
     /// * `processor` - A mutable closure that processes each chunk. It takes
@@ -145,10 +125,10 @@ impl<R: DataReader> DataStream<R> {
             // Read a chunk of data from the reader.
             let bytes_read = self.reader.read(&mut self.buffer)?;
             if bytes_read == 0 {
-                break; // End of stream
+                break;
             }
             
-            // Apply the processor function to the chunk.
+            // Apply the processor function to the chunk. This is the "no copy" part.
             processor(&self.buffer[..bytes_read]);
         }
         Ok(())
@@ -159,6 +139,7 @@ impl<R: DataReader> DataStream<R> {
 ///
 /// # Arguments
 /// * `path` - The path to the file to stream.
+/// * `chunk_size` - The size of the chunks to read.
 ///
 /// # Returns
 /// A `Result` containing a `DataStream` instance or a `DataStreamError`.
@@ -171,6 +152,7 @@ pub fn new_file_stream<P: AsRef<Path>>(path: P, chunk_size: usize) -> Result<Dat
 ///
 /// # Arguments
 /// * `stream` - The `TcpStream` to read from.
+/// * `chunk_size` - The size of the chunks to read.
 ///
 /// # Returns
 /// A `Result` containing a `DataStream` instance or a `DataStreamError`.
