@@ -31,6 +31,8 @@
 //!     * `quicksort` for an insanely fast in-place sorting algorithm.
 //!     * `compression` for high-performance LZ77-style data compression and decompression.
 //!     * `memory_pool` for zero-allocation memory management with pre-allocated pools.
+//!     * `buffer_pool` for reusable I/O buffers that eliminate allocation/deallocation cycles.
+//!     * `universal_processor` for revolutionary fractal processing that scales from bytes to terabytes.
 
 // Public Modules (ALL existing modules preserved)
 pub mod bloom_filter;
@@ -45,6 +47,8 @@ pub mod trie;
 pub mod quicksort;
 pub mod compression; // NEW MODULE ADDED
 pub mod memory_pool; // NEW MODULE ADDED
+pub mod buffer_pool; // NEW MODULE ADDED
+pub mod universal_processor; // UNIVERSAL PROCESSOR MODULE ADDED
 
 // Re-export the public APIs for easy access (ALL existing re-exports preserved)
 pub use bloom_filter::{BloomFilter, BloomFilterError};
@@ -83,4 +87,36 @@ pub use memory_pool::{
     create_small_pool,
     create_medium_pool,
     create_large_pool
+};
+
+// NEW RE-EXPORTS for buffer pool module
+pub use buffer_pool::{
+    BufferPool,
+    PooledBuffer,
+    BufferPoolError,
+    BufferPoolStats,
+    get_small_buffer,
+    get_medium_buffer,
+    get_large_buffer,
+    get_buffer,
+    get_global_stats,
+    clear_global_pools
+};
+
+// NEW RE-EXPORTS for universal processor module
+pub use universal_processor::{
+    UniversalProcessor,
+    UniversalProcessorError,
+    ProcessingPattern,
+    ScalingBehavior,
+    OptimizationMode,
+    DataPattern,
+    ProcessingStats,
+    ProcessingContext,
+    create_transform_processor,
+    create_aggregate_processor,
+    create_filter_processor,
+    create_math_processor,
+    process_adaptive,
+    process_fractal
 };
