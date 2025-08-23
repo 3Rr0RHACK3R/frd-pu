@@ -9,7 +9,7 @@ authors = ["3rror"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/3Rr0RHACK3R/frd-pu"
-keywords = ["high-performance", "data-processing", "zero-dependency", "memory-efficient", "rust", "universal-p"]
+keywords = ["high-performance", "data-processing", "zero-dependency", "memory-efficient", "rust"]
 categories = ["data-structures", "algorithms"]
 
 # This library is intentionally zero-dependency.
