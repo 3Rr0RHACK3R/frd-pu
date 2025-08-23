@@ -100,7 +100,7 @@ impl fmt::Display for PoolStats {
 pub struct FixedPool {
     blocks: Arc<Mutex<VecDeque<NonNull<u8>>>>,
     block_size: usize,
-    total_blocks: usize,
+    // total_blocks: usize, // REMOVED: This field was unused and caused a warning. The same info is in PoolStats.
     base_ptr: Option<NonNull<u8>>,
     layout: Layout,
     stats: Arc<Mutex<PoolStats>>,
@@ -150,7 +150,7 @@ impl FixedPool {
             Ok(FixedPool {
                 blocks: Arc::new(Mutex::new(blocks)),
                 block_size: aligned_size,
-                total_blocks: block_count,
+                // total_blocks: block_count, // REMOVED
                 base_ptr: Some(base_ptr),
                 layout,
                 stats: Arc::new(Mutex::new(stats)),
@@ -179,7 +179,9 @@ impl FixedPool {
         }
     }
 
-    /// Return a block to the pool (internal use)
+    // REMOVED: This method was unused and caused a warning.
+    // The `Drop` implementation for `PooledMemory` handles returning memory to the pool automatically.
+    /*
     fn deallocate(&self, ptr: NonNull<u8>) -> Result<(), MemoryPoolError> {
         // Verify the pointer is from this pool
         if let Some(base) = self.base_ptr {
@@ -200,6 +202,7 @@ impl FixedPool {
 
         Ok(())
     }
+    */
 
     /// Get current pool statistics
     pub fn stats(&self) -> PoolStats {
@@ -303,7 +306,8 @@ impl Drop for PooledMemory {
     fn drop(&mut self) {
         // Return memory to pool
         if let (Some(pool), Some(stats)) = (self.pool.upgrade(), self.stats.upgrade()) {
-            // We can't return the error here, but we should try to return the memory
+            // This block handles returning the memory to the pool.
+            // It's the reason the standalone `deallocate` function was not needed.
             let _ = {
                 let mut blocks = pool.lock().unwrap();
                 let mut pool_stats = stats.lock().unwrap();
