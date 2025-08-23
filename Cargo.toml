@@ -2,9 +2,10 @@
 
 [package]
 name = "frd_pu"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
-description = "The Fast RAM Data-Processing Unit. A high-performance, zero-dependency library for extreme efficiency."
+description = "The Fast RAM Data-Processing Unit. A high-performance, zero-dependency library for creating efficient
+ and fast applications."
 authors = ["3rror"]
 license = "MIT"
 readme = "README.md"
