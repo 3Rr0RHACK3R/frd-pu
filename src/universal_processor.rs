@@ -640,21 +640,22 @@ impl UniversalProcessor {
         F: Fn(&mut T) + Clone + Send + Sync,
     {
         // Fractal processing: recursively break down data into optimal chunks
-        if data.len() <= chunk_size {
+        let data_len = data.len();
+        if data_len <= chunk_size {
             return self.execute_sequential(data, operation);
         }
         
-        let mid = data.len() / 2;
+        let mid = data_len / 2;
         let (left, right) = data.split_at_mut(mid);
         
         // Process both halves in parallel if beneficial
-        if data.len() > chunk_size * 4 && self.context.cpu_cores > 1 {
+        if data_len > chunk_size * 4 && self.context.cpu_cores > 1 {
             std::thread::scope(|s| {
                 let left_op = operation.clone();
                 let right_op = operation.clone();
                 
-                let left_handle = s.spawn(|| self.execute_fractal(left, &left_op, chunk_size));
-                let right_handle = s.spawn(|| self.execute_fractal(right, &right_op, chunk_size));
+                let left_handle = s.spawn(move || self.execute_fractal(left, &left_op, chunk_size));
+                let right_handle = s.spawn(move || self.execute_fractal(right, &right_op, chunk_size));
                 
                 left_handle.join().map_err(|_| UniversalProcessorError::ProcessingFailed("Left thread panicked".to_string()))??;
                 right_handle.join().map_err(|_| UniversalProcessorError::ProcessingFailed("Right thread panicked".to_string()))??;
