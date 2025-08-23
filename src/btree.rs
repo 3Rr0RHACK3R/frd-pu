@@ -52,7 +52,7 @@ impl<K: Ord, V> Node<K, V> {
 /// This implementation will panic if it encounters a key already in the tree.
 /// This is not ideal, and a more robust implementation would return a `Result`.
 #[derive(Debug)]
-pub struct BinarySearchTree<K: Ord, V> {
+pub struct BinarySearchTree<K: Ord + fmt::Debug, V> {
     root: Option<Box<Node<K, V>>>,
 }
 
@@ -71,34 +71,26 @@ impl<K: Ord + fmt::Debug, V> BinarySearchTree<K, V> {
     /// # Returns
     /// `Ok(())` on success, or a `BinarySearchTreeError` if the key already exists.
     pub fn insert(&mut self, key: K, value: V) -> Result<(), BinarySearchTreeError> {
-        let new_node = Box::new(Node::new(key, value));
+        let mut current_node = &mut self.root;
 
-        if self.root.is_none() {
-            self.root = Some(new_node);
-            return Ok(());
-        }
-
-        let mut current = self.root.as_mut().unwrap();
         loop {
-            match new_node.key.cmp(&current.key) {
-                Ordering::Less => {
-                    if let Some(left) = current.left.as_mut() {
-                        current = left;
-                    } else {
-                        current.left = Some(new_node);
-                        return Ok(());
-                    }
+            match current_node {
+                None => {
+                    *current_node = Some(Box::new(Node::new(key, value)));
+                    return Ok(());
                 }
-                Ordering::Greater => {
-                    if let Some(right) = current.right.as_mut() {
-                        current = right;
-                    } else {
-                        current.right = Some(new_node);
-                        return Ok(());
+                Some(node) => {
+                    match key.cmp(&node.key) {
+                        Ordering::Less => {
+                            current_node = &mut node.left;
+                        }
+                        Ordering::Greater => {
+                            current_node = &mut node.right;
+                        }
+                        Ordering::Equal => {
+                            return Err(BinarySearchTreeError::KeyAlreadyExists);
+                        }
                     }
-                }
-                Ordering::Equal => {
-                    return Err(BinarySearchTreeError::KeyAlreadyExists);
                 }
             }
         }
