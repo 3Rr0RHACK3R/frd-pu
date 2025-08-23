@@ -1,3 +1,8 @@
+NOTICE! THIS IS THE FULL GUIDE 
+
+
+
+
 FRD-PU: The Fast RAM Data-Processing Unit
 A professional-grade, high-performance, and zero-dependency library built from the ground up for extreme efficiency. This crate is designed to handle massive computational tasks and data streams with minimal resource consumption. It is ideal for creating hyper-fast applications without a monstrous hardware footprint.
 
