@@ -67,7 +67,6 @@ pub struct LruCache<K, V> {
 impl<K, V> LruCache<K, V>
 where
     K: Eq + Hash + Clone,
-    V: std::mem::size_of_val,
 {
     /// Creates a new `LruCache` with the specified maximum size in bytes.
     pub fn new(max_size: usize) -> Self {
@@ -100,7 +99,13 @@ where
 
         // If the key already exists, remove it from the LRU list.
         if self.cache_map.contains_key(&key) {
-            self.lru_list.retain(|lru_key| lru_key != &key);
+            let mut new_lru_list = LinkedList::new();
+            for lru_key in self.lru_list.iter() {
+                if lru_key != &key {
+                    new_lru_list.push_back(lru_key.clone());
+                }
+            }
+            self.lru_list = new_lru_list;
             self.current_size -= std::mem::size_of_val(self.cache_map.get(&key).unwrap());
         }
 

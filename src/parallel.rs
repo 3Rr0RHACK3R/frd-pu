@@ -4,7 +4,6 @@ use std::error::Error;
 use std::fmt;
 use std::panic::{self, UnwindSafe};
 use std::thread;
-use std::sync::Arc;
 use std::marker::Send;
 
 /// Error type for parallel task execution.
