@@ -2,7 +2,7 @@
 
 [package]
 name = "frd_pu"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "The Fast RAM Data-Processing Unit. A high-performance, zero-dependency library for extreme efficiency."
 authors = ["3rror"]
