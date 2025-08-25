@@ -33,6 +33,7 @@
 //!     * `memory_pool` for zero-allocation memory management with pre-allocated pools.
 //!     * `buffer_pool` for reusable I/O buffers that eliminate allocation/deallocation cycles.
 //!     * `universal_processor` for revolutionary fractal processing that scales from bytes to terabytes.
+//!     * `tcp_server` for production-ready, maximum performance TCP server with Windows optimization.
 
 // Public Modules (ALL existing modules preserved)
 pub mod bloom_filter;
@@ -49,6 +50,7 @@ pub mod compression; // NEW MODULE ADDED
 pub mod memory_pool; // NEW MODULE ADDED
 pub mod buffer_pool; // NEW MODULE ADDED
 pub mod universal_processor; // UNIVERSAL PROCESSOR MODULE ADDED
+pub mod tcp_server; // TCP SERVER MODULE ADDED
 
 // Re-export the public APIs for easy access (ALL existing re-exports preserved)
 pub use bloom_filter::{BloomFilter, BloomFilterError};
@@ -119,4 +121,26 @@ pub use universal_processor::{
     create_math_processor,
     process_adaptive,
     process_fractal
+};
+
+// NEW RE-EXPORTS for tcp_server module
+pub use tcp_server::{
+    TcpServer,
+    TcpServerError,
+    ConnectionHandler,
+    ConnectionStats,
+    ConnectionStatsSnapshot,
+    ServerConfig,
+    EchoHandler,
+    HttpHandler,
+    new_echo_server,
+    new_http_server,
+    new_tcp_server,
+    new_tcp_server_with_config,
+    DEFAULT_BUFFER_SIZE,
+    MAX_BUFFER_SIZE,
+    MIN_BUFFER_SIZE,
+    DEFAULT_MAX_CONNECTIONS,
+    DEFAULT_TIMEOUT_SECS,
+    DEFAULT_RATE_LIMIT
 };
