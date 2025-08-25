@@ -33,7 +33,7 @@
 //!     * `memory_pool` for zero-allocation memory management with pre-allocated pools.
 //!     * `buffer_pool` for reusable I/O buffers that eliminate allocation/deallocation cycles.
 //!     * `universal_processor` for revolutionary fractal processing that scales from bytes to terabytes.
-//!     * `tcp_server` for production-ready, maximum performance TCP server with Windows optimization.
+//!     * `tcp_server` for a production-ready, maximum performance, cross-platform TCP server.
 
 // Public Modules (ALL existing modules preserved)
 pub mod bloom_filter;
@@ -46,11 +46,11 @@ pub mod hasher;
 pub mod btree;
 pub mod trie;
 pub mod quicksort;
-pub mod compression; // NEW MODULE ADDED
-pub mod memory_pool; // NEW MODULE ADDED
-pub mod buffer_pool; // NEW MODULE ADDED
-pub mod universal_processor; // UNIVERSAL PROCESSOR MODULE ADDED
-pub mod tcp_server; // TCP SERVER MODULE ADDED
+pub mod compression; 
+pub mod memory_pool; 
+pub mod buffer_pool; 
+pub mod universal_processor; 
+pub mod tcp_server; 
 
 // Re-export the public APIs for easy access (ALL existing re-exports preserved)
 pub use bloom_filter::{BloomFilter, BloomFilterError};
@@ -64,7 +64,7 @@ pub use btree::{BinarySearchTree, BinarySearchTreeError};
 pub use trie::{Trie, TrieError};
 pub use quicksort::{quicksort, QuickSortError};
 
-// NEW RE-EXPORTS for compression module
+// RE-EXPORTS for compression module
 pub use compression::{
     CompressionEngine, 
     CompressionError, 
@@ -76,7 +76,7 @@ pub use compression::{
     get_compression_stats
 };
 
-// NEW RE-EXPORTS for memory pool module
+// RE-EXPORTS for memory pool module
 pub use memory_pool::{
     FixedPool,
     ObjectPool,
@@ -91,7 +91,7 @@ pub use memory_pool::{
     create_large_pool
 };
 
-// NEW RE-EXPORTS for buffer pool module
+// RE-EXPORTS for buffer pool module
 pub use buffer_pool::{
     BufferPool,
     PooledBuffer,
@@ -105,7 +105,7 @@ pub use buffer_pool::{
     clear_global_pools
 };
 
-// NEW RE-EXPORTS for universal processor module
+// RE-EXPORTS for universal processor module
 pub use universal_processor::{
     UniversalProcessor,
     UniversalProcessorError,
@@ -123,7 +123,7 @@ pub use universal_processor::{
     process_fractal
 };
 
-// NEW RE-EXPORTS for tcp_server module
+// RE-EXPORTS for tcp_server module
 pub use tcp_server::{
     TcpServer,
     TcpServerError,

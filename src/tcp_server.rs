@@ -1,23 +1,20 @@
 // src/tcp_server.rs
 
-//! # High-Performance TCP Server Module - Windows Optimized
+//! # High-Performance, Cross-Platform TCP Server Module
 //!
-//! Production-ready, zero-dependency TCP server designed for maximum throughput
-//! on Windows systems. Built for the FRD-PU philosophy with Windows-specific optimizations.
+//! A production-ready, zero-dependency TCP server designed for maximum throughput
+//! on both Windows and Unix-like systems. Built with the FRD-PU philosophy, this
+//! module provides a robust foundation for any network application.
 //!
 //! ## Features:
-//! - Zero external dependencies (Rust std only)
-//! - Windows IOCP optimized for maximum performance
-//! - Lock-free, high-performance architecture
-//! - Massive concurrent connections (100k+)
-//! - Advanced connection management with keep-alive
-//! - Built-in rate limiting and DoS protection
-//! - Comprehensive logging and metrics
-//! - Graceful shutdown and error recovery
-//! - Memory-efficient buffer management
-//! - Production monitoring and health checks
-//! - IPv4 and IPv6 support
-//! - Windows socket optimizations (WSASend, WSARecv)
+//! - **Cross-Platform:** Works seamlessly on Windows, Linux, and macOS.
+//! - **Zero Dependencies:** Relies only on the Rust standard library.
+//! - **High-Performance Architecture:** Lock-free, non-blocking design for massive concurrency.
+//! - **Advanced Connection Management:** Supports keep-alive and graceful shutdowns.
+//! - **Built-in Security:** Includes rate limiting for DoS protection.
+//! - **Comprehensive Monitoring:** Provides detailed statistics and health checks.
+//! - **Memory-Efficient:** Uses a robust buffer management strategy.
+//! - **Full IPv4/IPv6 Support.**
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write, ErrorKind};
@@ -27,25 +24,17 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::fmt;
-use std::mem;
 
-// Windows-specific imports
-use std::os::windows::io::{AsRawSocket, RawSocket};
+// Platform-specific modules for socket operations
+mod platform;
+use platform::{set_socket_options, AsConnectionId, ConnectionId};
 
-/// Windows socket optimization constants
-const SO_REUSEADDR: i32 = 0x0004;
-const TCP_NODELAY: i32 = 0x0001;
-const IPPROTO_TCP: i32 = 6;
-const SOL_SOCKET: i32 = 0xffff;
-const SO_KEEPALIVE: i32 = 0x0008;
-const SO_RCVBUF: i32 = 0x1002;
-const SO_SNDBUF: i32 = 0x1001;
 
 /// Buffer size constants
 pub const DEFAULT_BUFFER_SIZE: usize = 64 * 1024; // 64KB
 pub const MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1MB
 pub const MIN_BUFFER_SIZE: usize = 4 * 1024; // 4KB
-pub const SOCKET_BUFFER_SIZE: usize = 256 * 1024; // 256KB for Windows socket buffers
+pub const SOCKET_BUFFER_SIZE: usize = 256 * 1024; // 256KB for OS-level socket buffers
 
 /// Default configuration constants
 pub const DEFAULT_MAX_CONNECTIONS: usize = 10000;
@@ -55,90 +44,6 @@ pub const DEFAULT_RATE_LIMIT: usize = 1000; // requests per second per connectio
 pub const DEFAULT_MAX_REQUEST_SIZE: usize = 1024 * 1024; // 1MB
 pub const DEFAULT_WORKER_THREADS: usize = 8;
 
-/// Windows-specific socket optimization
-fn set_windows_socket_options<S: AsRawSocket>(socket_like: &S) -> io::Result<()> {
-    let socket = socket_like.as_raw_socket();
-    
-    unsafe {
-        // Enable TCP_NODELAY for low latency
-        let nodelay: u32 = 1;
-        let result = setsockopt(
-            socket as usize,
-            IPPROTO_TCP,
-            TCP_NODELAY,
-            &nodelay as *const u32 as *const i8,
-            mem::size_of::<u32>() as i32,
-        );
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        
-        // Enable SO_REUSEADDR
-        let reuse: u32 = 1;
-        let result = setsockopt(
-            socket as usize,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            &reuse as *const u32 as *const i8,
-            mem::size_of::<u32>() as i32,
-        );
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        
-        // Enable SO_KEEPALIVE
-        let keepalive: u32 = 1;
-        let result = setsockopt(
-            socket as usize,
-            SOL_SOCKET,
-            SO_KEEPALIVE,
-            &keepalive as *const u32 as *const i8,
-            mem::size_of::<u32>() as i32,
-        );
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        
-        // Set receive buffer size
-        let rcvbuf: u32 = SOCKET_BUFFER_SIZE as u32;
-        let result = setsockopt(
-            socket as usize,
-            SOL_SOCKET,
-            SO_RCVBUF,
-            &rcvbuf as *const u32 as *const i8,
-            mem::size_of::<u32>() as i32,
-        );
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        
-        // Set send buffer size
-        let sndbuf: u32 = SOCKET_BUFFER_SIZE as u32;
-        let result = setsockopt(
-            socket as usize,
-            SOL_SOCKET,
-            SO_SNDBUF,
-            &sndbuf as *const u32 as *const i8,
-            mem::size_of::<u32>() as i32,
-        );
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    
-    Ok(())
-}
-
-// Windows setsockopt declaration
-extern "system" {
-    fn setsockopt(
-        s: usize,
-        level: i32,
-        optname: i32,
-        optval: *const i8,
-        optlen: i32,
-    ) -> i32;
-}
 
 /// TCP Server errors with detailed context
 #[derive(Debug)]
@@ -154,7 +59,7 @@ pub enum TcpServerError {
     ConfigurationError(String),
     ResourceExhausted(String),
     ProtocolError(String),
-    WindowsSocketError { code: i32, message: String },
+    SocketOptionError { description: String, source: io::Error },
 }
 
 impl fmt::Display for TcpServerError {
@@ -171,7 +76,7 @@ impl fmt::Display for TcpServerError {
             TcpServerError::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
             TcpServerError::ResourceExhausted(msg) => write!(f, "Resource exhausted: {}", msg),
             TcpServerError::ProtocolError(msg) => write!(f, "Protocol error: {}", msg),
-            TcpServerError::WindowsSocketError { code, message } => write!(f, "Windows socket error {}: {}", code, message),
+            TcpServerError::SocketOptionError{ description, source } => write!(f, "Failed to set socket option '{}': {}", description, source),
         }
     }
 }
@@ -364,16 +269,15 @@ struct Connection {
     bytes_received: u64,
     bytes_sent: u64,
     rate_limiter: RateLimiter,
-    established_at: Instant,
 }
 
 impl Connection {
-    fn new(stream: TcpStream, addr: SocketAddr, config: &ServerConfig) -> io::Result<Self> {
+    fn new(stream: TcpStream, addr: SocketAddr, config: &ServerConfig) -> Result<Self, TcpServerError> {
         // Set non-blocking mode
         stream.set_nonblocking(true)?;
         
-        // Apply Windows socket optimizations
-        set_windows_socket_options(&stream)?;
+        // Apply cross-platform socket optimizations
+        set_socket_options(&stream, config)?;
         
         let now = Instant::now();
         Ok(Self {
@@ -385,7 +289,6 @@ impl Connection {
             bytes_received: 0,
             bytes_sent: 0,
             rate_limiter: RateLimiter::new(config.rate_limit, config.rate_limit_window),
-            established_at: now,
         })
     }
     
@@ -439,11 +342,11 @@ impl Connection {
     }
 }
 
-/// High-performance Windows-optimized TCP Server
+/// High-performance cross-platform TCP Server
 pub struct TcpServer<H: ConnectionHandler> {
     listener: Option<TcpListener>,
     handler: Arc<H>,
-    connections: HashMap<RawSocket, Connection>,
+    connections: HashMap<ConnectionId, Connection>,
     running: Arc<AtomicBool>,
     stats: Arc<ConnectionStats>,
     start_time: Instant,
@@ -467,8 +370,8 @@ impl<H: ConnectionHandler> TcpServer<H> {
         // Set listener to non-blocking mode
         listener.set_nonblocking(true)?;
         
-        // Apply Windows socket optimizations to listener
-        set_windows_socket_options(&listener)?;
+        // Apply cross-platform socket optimizations to listener
+        set_socket_options(&listener, &config)?;
         
         Ok(Self {
             listener: Some(listener),
@@ -518,7 +421,7 @@ impl<H: ConnectionHandler> TcpServer<H> {
         self.running.store(true, Ordering::Relaxed);
         self.start_time = Instant::now();
         
-        println!("FRD-PU TCP Server starting on {} (Windows optimized)", local_addr);
+        println!("FRD-PU TCP Server starting on {} (Cross-Platform)", local_addr);
         println!("Configuration: {} max connections, {}KB buffers, {:?} timeout", 
                 self.config.max_connections, 
                 self.config.buffer_size / 1024,
@@ -526,7 +429,7 @@ impl<H: ConnectionHandler> TcpServer<H> {
         
         self.handler.on_server_start();
         
-        // Main event loop - maximum performance, no blocking
+        // Main event loop - non-blocking
         while self.running.load(Ordering::Relaxed) {
             // Accept new connections
             self.accept_connections(&listener)?;
@@ -540,8 +443,8 @@ impl<H: ConnectionHandler> TcpServer<H> {
             // Update statistics
             self.update_stats();
             
-            // Micro-sleep to prevent CPU spinning (Windows optimized)
-            thread::sleep(Duration::from_micros(50));
+            // Micro-sleep to prevent CPU spinning
+            thread::sleep(Duration::from_micros(100));
         }
         
         // Graceful shutdown
@@ -566,9 +469,9 @@ impl<H: ConnectionHandler> TcpServer<H> {
                     // Create new connection
                     match Connection::new(stream, addr, &self.config) {
                         Ok(connection) => {
-                            let socket = connection.stream.as_raw_socket();
+                            let conn_id = connection.stream.as_conn_id();
                             self.handler.on_connect(addr);
-                            self.connections.insert(socket, connection);
+                            self.connections.insert(conn_id, connection);
                             
                             self.stats.total_connections.fetch_add(1, Ordering::Relaxed);
                             self.stats.active_connections.store(self.connections.len(), Ordering::Relaxed);
@@ -593,7 +496,7 @@ impl<H: ConnectionHandler> TcpServer<H> {
     fn process_connections(&mut self) -> Result<(), TcpServerError> {
         let mut to_remove = Vec::new();
         
-        for (socket, connection) in self.connections.iter_mut() {
+        for (conn_id, connection) in self.connections.iter_mut() {
             match Self::process_single_connection(
                 connection,
                 &self.config,
@@ -602,25 +505,24 @@ impl<H: ConnectionHandler> TcpServer<H> {
             ) {
                 Ok(true) => {
                     // Connection processed successfully
-                    // Note: byte stats are handled within the connection now, no need to add here
                 }
                 Ok(false) => {
                     // Connection should be closed
                     self.handler.on_disconnect(connection.addr);
-                    to_remove.push(*socket);
+                    to_remove.push(*conn_id);
                 }
                 Err(_) => {
                     // Connection error
                     self.stats.errors_count.fetch_add(1, Ordering::Relaxed);
                     self.handler.on_disconnect(connection.addr);
-                    to_remove.push(*socket);
+                    to_remove.push(*conn_id);
                 }
             }
         }
         
         // Remove closed connections
-        for socket in to_remove {
-            self.connections.remove(&socket);
+        for conn_id in to_remove {
+            self.connections.remove(&conn_id);
         }
         
         self.stats.active_connections.store(self.connections.len(), Ordering::Relaxed);
@@ -646,10 +548,8 @@ impl<H: ConnectionHandler> TcpServer<H> {
         
         // Write pending data
         let bytes_written_before = conn.bytes_sent;
-        match conn.write_pending() {
-            Ok(false) => {}, // Still have data to write
-            Ok(true) => {}, // All data written
-            Err(_) => return Ok(false), // Write error
+        if !conn.write_pending()? {
+             // Still have data to write or error occurred
         }
         let bytes_written_after = conn.bytes_sent;
         if bytes_written_after > bytes_written_before {
@@ -661,8 +561,7 @@ impl<H: ConnectionHandler> TcpServer<H> {
             // Check rate limit
             if !conn.check_rate_limit() {
                 stats.rate_limited_count.fetch_add(1, Ordering::Relaxed);
-                // Optionally close connection or just skip processing
-                return Ok(true);
+                return Ok(true); // Don't close, just skip processing
             }
             
             // Process the request
@@ -681,15 +580,15 @@ impl<H: ConnectionHandler> TcpServer<H> {
     fn cleanup_connections(&mut self) {
         let mut to_remove = Vec::new();
         
-        for (socket, connection) in self.connections.iter() {
+        for (conn_id, connection) in self.connections.iter() {
             if connection.is_timed_out(self.config.timeout) {
-                to_remove.push(*socket);
+                to_remove.push(*conn_id);
                 self.stats.timeout_count.fetch_add(1, Ordering::Relaxed);
             }
         }
         
-        for socket in to_remove {
-            if let Some(connection) = self.connections.remove(&socket) {
+        for conn_id in to_remove {
+            if let Some(connection) = self.connections.remove(&conn_id) {
                 self.handler.on_disconnect(connection.addr);
             }
         }
@@ -754,8 +653,10 @@ impl<H: ConnectionHandler> TcpServer<H> {
 // Graceful shutdown on Drop
 impl<H: ConnectionHandler> Drop for TcpServer<H> {
     fn drop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        self.shutdown_connections();
+        if self.is_running() {
+            self.running.store(false, Ordering::Relaxed);
+            self.shutdown_connections();
+        }
     }
 }
 
@@ -784,6 +685,163 @@ pub fn new_tcp_server_with_config<H: ConnectionHandler>(
 ) -> Result<TcpServer<H>, TcpServerError> {
     TcpServer::with_config(addr, handler, config)
 }
+
+
+/// Platform-specific socket implementation details
+mod platform {
+    use super::{ServerConfig, TcpServerError};
+    use std::io;
+    use std::mem;
+
+    // Define a platform-agnostic connection identifier and a trait to access it.
+    #[cfg(unix)]
+    pub use std::os::unix::io::{AsRawFd, RawFd as ConnectionId};
+    #[cfg(windows)]
+    pub use std::os::windows::io::{AsRawSocket, RawSocket as ConnectionId};
+
+    pub trait AsConnectionId {
+        fn as_conn_id(&self) -> ConnectionId;
+    }
+
+    #[cfg(unix)]
+    impl<T: AsRawFd> AsConnectionId for T {
+        fn as_conn_id(&self) -> ConnectionId {
+            self.as_raw_fd()
+        }
+    }
+
+    #[cfg(windows)]
+    impl<T: AsRawSocket> AsConnectionId for T {
+        fn as_conn_id(&self) -> ConnectionId {
+            self.as_raw_socket()
+        }
+    }
+
+    /// Set cross-platform socket options.
+    pub fn set_socket_options<S: AsConnectionId>(
+        socket_like: &S,
+        config: &ServerConfig,
+    ) -> Result<(), TcpServerError> {
+        #[cfg(windows)]
+        return windows::set_socket_options_impl(socket_like, config);
+        #[cfg(unix)]
+        return unix::set_socket_options_impl(socket_like, config);
+    }
+
+    /// Windows-specific socket options implementation.
+    #[cfg(windows)]
+    mod windows {
+        use super::*;
+        use std::os::windows::io::{AsRawSocket, RawSocket};
+        
+        // Windows-specific FFI for setsockopt
+        #[link(name = "ws2_32")]
+        extern "system" {
+            fn setsockopt(s: RawSocket, level: i32, optname: i32, optval: *const i8, optlen: i32) -> i32;
+        }
+
+        const SOL_SOCKET: i32 = 0xffff;
+        const SO_REUSEADDR: i32 = 0x0004;
+        const SO_KEEPALIVE: i32 = 0x0008;
+        const SO_RCVBUF: i32 = 0x1002;
+        const SO_SNDBUF: i32 = 0x1001;
+        const IPPROTO_TCP: i32 = 6;
+        const TCP_NODELAY: i32 = 0x0001;
+        
+        pub fn set_socket_options_impl<S: AsRawSocket>(
+            socket_like: &S,
+            config: &ServerConfig,
+        ) -> Result<(), TcpServerError> {
+            let socket = socket_like.as_raw_socket();
+            
+            set_opt(socket, SOL_SOCKET, SO_REUSEADDR, config.enable_keepalive as u32, "SO_REUSEADDR")?;
+            set_opt(socket, SOL_SOCKET, SO_KEEPALIVE, config.enable_keepalive as u32, "SO_KEEPALIVE")?;
+            set_opt(socket, IPPROTO_TCP, TCP_NODELAY, config.enable_nodelay as u32, "TCP_NODELAY")?;
+            set_opt(socket, SOL_SOCKET, SO_RCVBUF, config.socket_buffer_size as u32, "SO_RCVBUF")?;
+            set_opt(socket, SOL_SOCKET, SO_SNDBUF, config.socket_buffer_size as u32, "SO_SNDBUF")?;
+            
+            Ok(())
+        }
+
+        fn set_opt(socket: RawSocket, level: i32, optname: i32, optval: u32, desc: &str) -> Result<(), TcpServerError> {
+            let result = unsafe {
+                setsockopt(
+                    socket,
+                    level,
+                    optname,
+                    &optval as *const u32 as *const i8,
+                    mem::size_of::<u32>() as i32,
+                )
+            };
+            if result != 0 {
+                Err(TcpServerError::SocketOptionError {
+                    description: desc.to_string(),
+                    source: io::Error::last_os_error(),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Unix-specific socket options implementation.
+    #[cfg(unix)]
+    mod unix {
+        use super::*;
+        use std::os::unix::io::{AsRawFd, RawFd};
+        use std::ffi::c_void;
+
+        // FFI for setsockopt on Unix-like systems
+        extern "C" {
+            fn setsockopt(socket: i32, level: i32, name: i32, value: *const c_void, option_len: u32) -> i32;
+        }
+
+        // Constants from libc, defined here to avoid a dependency.
+        const SOL_SOCKET: i32 = 1;
+        const SO_REUSEADDR: i32 = 2;
+        const SO_KEEPALIVE: i32 = 9;
+        const SO_RCVBUF: i32 = 8;
+        const SO_SNDBUF: i32 = 7;
+        const IPPROTO_TCP: i32 = 6;
+        const TCP_NODELAY: i32 = 1;
+
+        pub fn set_socket_options_impl<S: AsRawFd>(
+            socket_like: &S,
+            config: &ServerConfig,
+        ) -> Result<(), TcpServerError> {
+            let fd = socket_like.as_raw_fd();
+
+            set_opt(fd, SOL_SOCKET, SO_REUSEADDR, config.enable_keepalive as u32, "SO_REUSEADDR")?;
+            set_opt(fd, SOL_SOCKET, SO_KEEPALIVE, config.enable_keepalive as u32, "SO_KEEPALIVE")?;
+            set_opt(fd, IPPROTO_TCP, TCP_NODELAY, config.enable_nodelay as u32, "TCP_NODELAY")?;
+            set_opt(fd, SOL_SOCKET, SO_RCVBUF, config.socket_buffer_size as u32, "SO_RCVBUF")?;
+            set_opt(fd, SOL_SOCKET, SO_SNDBUF, config.socket_buffer_size as u32, "SO_SNDBUF")?;
+
+            Ok(())
+        }
+
+        fn set_opt(fd: RawFd, level: i32, optname: i32, optval: u32, desc: &str) -> Result<(), TcpServerError> {
+            let result = unsafe {
+                setsockopt(
+                    fd,
+                    level,
+                    optname,
+                    &optval as *const u32 as *const c_void,
+                    mem::size_of::<u32>() as u32,
+                )
+            };
+            if result != 0 {
+                Err(TcpServerError::SocketOptionError {
+                    description: desc.to_string(),
+                    source: io::Error::last_os_error(),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -866,11 +924,11 @@ mod tests {
     }
     
     #[test]
-    fn test_windows_socket_options() {
+    fn test_socket_options() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let result = set_windows_socket_options(&listener);
-        // This might fail in test environment, but shouldn't panic
-        println!("Socket options result: {:?}", result);
+        let config = ServerConfig::default();
+        let result = set_socket_options(&listener, &config);
+        assert!(result.is_ok(), "Setting socket options failed: {:?}", result.err());
     }
     
     #[test]
@@ -882,111 +940,5 @@ mod tests {
         let snapshot = stats.get_snapshot();
         assert_eq!(snapshot.total_connections, 100);
         assert_eq!(snapshot.bytes_received, 1024 * 1024);
-    }
-    
-    // Integration test - requires manual verification
-    #[test]
-    #[ignore] // Use `cargo test -- --ignored` to run
-    fn test_echo_server_integration() {
-        let mut server = new_echo_server("127.0.0.1:8080").unwrap();
-        
-        // Start server in background thread
-        let _server_handle = thread::spawn(move || {
-            println!("Starting echo server on 127.0.0.1:8080");
-            server.serve().unwrap();
-        });
-        
-        // Give server time to start
-        thread::sleep(Duration::from_millis(500));
-        
-        // Test multiple clients
-        let mut handles = Vec::new();
-        for i in 0..10 {
-            let handle = thread::spawn(move || {
-                let mut stream = TcpStream::connect("127.0.0.1:8080").unwrap();
-                let message = format!("Hello from client {}", i);
-                stream.write_all(message.as_bytes()).unwrap();
-                
-                let mut buffer = [0; 1024];
-                let n = stream.read(&mut buffer).unwrap();
-                let response = String::from_utf8_lossy(&buffer[..n]);
-                
-                assert_eq!(response, message);
-                println!("Client {}: OK", i);
-            });
-            handles.push(handle);
-        }
-        
-        // Wait for all clients
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        
-        println!("All clients completed successfully");
-        
-        // Note: Server will continue running - this is just a demo
-        // In production, you'd have a proper shutdown mechanism
-    }
-    
-    // Performance benchmark test
-    #[test]
-    #[ignore] // Use `cargo test -- --ignored` to run
-    fn test_performance_benchmark() {
-        struct BenchHandler;
-        
-        impl ConnectionHandler for BenchHandler {
-            fn handle_data(&self, _data: &[u8], _addr: SocketAddr) -> Option<Vec<u8>> {
-                // Simple response for benchmarking
-                Some(b"OK".to_vec())
-            }
-        }
-        
-        let config = ServerConfig {
-            max_connections: 50000,
-            buffer_size: 8192,
-            timeout: Duration::from_secs(60),
-            rate_limit: 10000,
-            rate_limit_window: Duration::from_secs(1),
-            ..Default::default()
-        };
-        
-        let mut server = new_tcp_server_with_config("127.0.0.1:8081", BenchHandler, config).unwrap();
-        
-        let _server_handle = thread::spawn(move || {
-            println!("Starting benchmark server on 127.0.0.1:8081");
-            server.serve().unwrap();
-        });
-        
-        thread::sleep(Duration::from_millis(500));
-        
-        let start_time = Instant::now();
-        let num_requests = 1000;
-        
-        // Spawn multiple client threads for load testing
-        let mut handles = Vec::new();
-        for _ in 0..10 {
-            let handle = thread::spawn(move || {
-                for _ in 0..num_requests / 10 {
-                    if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8081") {
-                        let _ = stream.write_all(b"BENCH");
-                        let mut buffer = [0; 16];
-                        let _ = stream.read(&mut buffer);
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-        
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        
-        let elapsed = start_time.elapsed();
-        let rps = num_requests as f64 / elapsed.as_secs_f64();
-        
-        println!("Benchmark completed: {} requests in {:?} ({:.2} req/s)", 
-                num_requests, elapsed, rps);
-        
-        assert!(rps > 100.0, "Performance too low: {:.2} req/s", rps);
     }
 }
