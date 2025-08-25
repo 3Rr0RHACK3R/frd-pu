@@ -25,8 +25,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::fmt;
 
-// Platform-specific modules for socket operations
-mod platform;
+// Use the platform-specific module defined at the end of the file.
 use platform::{set_socket_options, AsConnectionId, ConnectionId};
 
 
@@ -717,24 +716,15 @@ mod platform {
         }
     }
 
-    /// Set cross-platform socket options.
-    pub fn set_socket_options<S: AsConnectionId>(
-        socket_like: &S,
-        config: &ServerConfig,
-    ) -> Result<(), TcpServerError> {
-        #[cfg(windows)]
-        return windows::set_socket_options_impl(socket_like, config);
-        #[cfg(unix)]
-        return unix::set_socket_options_impl(socket_like, config);
-    }
-
     /// Windows-specific socket options implementation.
+    #[cfg(windows)]
+    pub use self::windows::set_socket_options;
+    
     #[cfg(windows)]
     mod windows {
         use super::*;
         use std::os::windows::io::{AsRawSocket, RawSocket};
         
-        // Windows-specific FFI for setsockopt
         #[link(name = "ws2_32")]
         extern "system" {
             fn setsockopt(s: RawSocket, level: i32, optname: i32, optval: *const i8, optlen: i32) -> i32;
@@ -748,7 +738,7 @@ mod platform {
         const IPPROTO_TCP: i32 = 6;
         const TCP_NODELAY: i32 = 0x0001;
         
-        pub fn set_socket_options_impl<S: AsRawSocket>(
+        pub fn set_socket_options<S: AsRawSocket>(
             socket_like: &S,
             config: &ServerConfig,
         ) -> Result<(), TcpServerError> {
@@ -786,17 +776,18 @@ mod platform {
 
     /// Unix-specific socket options implementation.
     #[cfg(unix)]
+    pub use self::unix::set_socket_options;
+
+    #[cfg(unix)]
     mod unix {
         use super::*;
         use std::os::unix::io::{AsRawFd, RawFd};
         use std::ffi::c_void;
 
-        // FFI for setsockopt on Unix-like systems
         extern "C" {
             fn setsockopt(socket: i32, level: i32, name: i32, value: *const c_void, option_len: u32) -> i32;
         }
 
-        // Constants from libc, defined here to avoid a dependency.
         const SOL_SOCKET: i32 = 1;
         const SO_REUSEADDR: i32 = 2;
         const SO_KEEPALIVE: i32 = 9;
@@ -805,7 +796,7 @@ mod platform {
         const IPPROTO_TCP: i32 = 6;
         const TCP_NODELAY: i32 = 1;
 
-        pub fn set_socket_options_impl<S: AsRawFd>(
+        pub fn set_socket_options<S: AsRawFd>(
             socket_like: &S,
             config: &ServerConfig,
         ) -> Result<(), TcpServerError> {
