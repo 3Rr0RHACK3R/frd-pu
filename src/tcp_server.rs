@@ -594,11 +594,15 @@ impl<H: ConnectionHandler> TcpServer<H> {
         let mut to_remove = Vec::new();
         
         for (socket, connection) in self.connections.iter_mut() {
-            match self.process_single_connection(connection) {
+            match Self::process_single_connection(
+                connection,
+                &self.config,
+                &self.stats,
+                &self.handler
+            ) {
                 Ok(true) => {
                     // Connection processed successfully
-                    self.stats.bytes_received.fetch_add(connection.bytes_received, Ordering::Relaxed);
-                    self.stats.bytes_sent.fetch_add(connection.bytes_sent, Ordering::Relaxed);
+                    // Note: byte stats are handled within the connection now, no need to add here
                 }
                 Ok(false) => {
                     // Connection should be closed
@@ -623,35 +627,48 @@ impl<H: ConnectionHandler> TcpServer<H> {
         Ok(())
     }
     
-    /// Process a single connection
-    fn process_single_connection(&self, conn: &mut Connection) -> Result<bool, TcpServerError> {
+    /// Process a single connection (as a static method to avoid borrow issues)
+    fn process_single_connection(
+        conn: &mut Connection,
+        config: &ServerConfig,
+        stats: &Arc<ConnectionStats>,
+        handler: &Arc<H>
+    ) -> Result<bool, TcpServerError> {
         // Read available data
-        match conn.read_available(self.config.max_request_size) {
+        match conn.read_available(config.max_request_size) {
             Ok(0) if conn.read_buffer.is_empty() => return Ok(false), // Connection closed
+            Ok(n) if n > 0 => {
+                stats.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+            }
             Ok(_) => {}, // Data received or would block
             Err(_) => return Ok(false), // Read error
         }
         
         // Write pending data
+        let bytes_written_before = conn.bytes_sent;
         match conn.write_pending() {
             Ok(false) => {}, // Still have data to write
             Ok(true) => {}, // All data written
             Err(_) => return Ok(false), // Write error
+        }
+        let bytes_written_after = conn.bytes_sent;
+        if bytes_written_after > bytes_written_before {
+            stats.bytes_sent.fetch_add(bytes_written_after - bytes_written_before, Ordering::Relaxed);
         }
         
         // Process complete requests in buffer
         if !conn.read_buffer.is_empty() {
             // Check rate limit
             if !conn.check_rate_limit() {
-                self.stats.rate_limited_count.fetch_add(1, Ordering::Relaxed);
+                stats.rate_limited_count.fetch_add(1, Ordering::Relaxed);
                 // Optionally close connection or just skip processing
                 return Ok(true);
             }
             
             // Process the request
-            if let Some(response) = self.handler.handle_data(&conn.read_buffer, conn.addr) {
+            if let Some(response) = handler.handle_data(&conn.read_buffer, conn.addr) {
                 conn.queue_response(response);
-                self.stats.messages_processed.fetch_add(1, Ordering::Relaxed);
+                stats.messages_processed.fetch_add(1, Ordering::Relaxed);
             }
             
             conn.read_buffer.clear();
