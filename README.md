@@ -1,7 +1,6 @@
 NOTICE! THIS IS THE FULL GUIDE 
 WE HAVE ADDED POWERFUL FEATURES , PLEASE REPORT ISSUES AT https://github.com/3Rr0RHACK3R/frd-pu/issues , WE RECOMMEND IT!
-
-
+NOTE! WE HAVE MADE THIS FOR WINDOWS , WE DONT KNOW ABOUT TOHER OS'S , RELEASING FOR LINUX SOON!
 
 FRD-PU: The Fast RAM Data-Processing Unit
 A professional-grade, high-performance, and zero-dependency library built from the ground up for extreme efficiency. This crate is designed to handle massive computational tasks and data streams with minimal resource consumption. It is ideal for creating hyper-fast applications without a monstrous hardware footprint.

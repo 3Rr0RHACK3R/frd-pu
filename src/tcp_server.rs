@@ -21,19 +21,16 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write, ErrorKind};
-use std::net::{TcpListener, TcpStream, SocketAddr, Shutdown, IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{TcpListener, TcpStream, SocketAddr, Shutdown};
 use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use std::fmt;
-use std::ptr;
 use std::mem;
 
 // Windows-specific imports
 use std::os::windows::io::{AsRawSocket, RawSocket};
-use std::os::windows::ffi::OsStrExt;
-use std::ffi::OsStr;
 
 /// Windows socket optimization constants
 const SO_REUSEADDR: i32 = 0x0004;
@@ -59,8 +56,8 @@ pub const DEFAULT_MAX_REQUEST_SIZE: usize = 1024 * 1024; // 1MB
 pub const DEFAULT_WORKER_THREADS: usize = 8;
 
 /// Windows-specific socket optimization
-fn set_windows_socket_options(stream: &TcpStream) -> io::Result<()> {
-    let socket = stream.as_raw_socket();
+fn set_windows_socket_options<S: AsRawSocket>(socket_like: &S) -> io::Result<()> {
+    let socket = socket_like.as_raw_socket();
     
     unsafe {
         // Enable TCP_NODELAY for low latency
@@ -186,7 +183,7 @@ impl From<io::Error> for TcpServerError {
 }
 
 /// Connection statistics for monitoring
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ConnectionStats {
     pub total_connections: AtomicUsize,
     pub active_connections: AtomicUsize,
@@ -312,10 +309,10 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     fn handle_data(&self, data: &[u8], addr: SocketAddr) -> Option<Vec<u8>>;
     
     /// Called when a new connection is established
-    fn on_connect(&self, addr: SocketAddr) {}
+    fn on_connect(&self, _addr: SocketAddr) {}
     
     /// Called when a connection is closed
-    fn on_disconnect(&self, addr: SocketAddr) {}
+    fn on_disconnect(&self, _addr: SocketAddr) {}
     
     /// Called on server start
     fn on_server_start(&self) {}
@@ -627,7 +624,7 @@ impl<H: ConnectionHandler> TcpServer<H> {
     }
     
     /// Process a single connection
-    fn process_single_connection(&mut self, conn: &mut Connection) -> Result<bool, TcpServerError> {
+    fn process_single_connection(&self, conn: &mut Connection) -> Result<bool, TcpServerError> {
         // Read available data
         match conn.read_available(self.config.max_request_size) {
             Ok(0) if conn.read_buffer.is_empty() => return Ok(false), // Connection closed
@@ -689,7 +686,7 @@ impl<H: ConnectionHandler> TcpServer<H> {
     
     /// Shutdown all connections gracefully
     fn shutdown_connections(&mut self) {
-        for (_, mut connection) in self.connections.drain() {
+        for (_, connection) in self.connections.drain() {
             let _ = connection.stream.shutdown(Shutdown::Both);
             self.handler.on_disconnect(connection.addr);
         }
@@ -877,7 +874,7 @@ mod tests {
         let mut server = new_echo_server("127.0.0.1:8080").unwrap();
         
         // Start server in background thread
-        let server_handle = thread::spawn(move || {
+        let _server_handle = thread::spawn(move || {
             println!("Starting echo server on 127.0.0.1:8080");
             server.serve().unwrap();
         });
@@ -921,7 +918,7 @@ mod tests {
         struct BenchHandler;
         
         impl ConnectionHandler for BenchHandler {
-            fn handle_data(&self, data: &[u8], _addr: SocketAddr) -> Option<Vec<u8>> {
+            fn handle_data(&self, _data: &[u8], _addr: SocketAddr) -> Option<Vec<u8>> {
                 // Simple response for benchmarking
                 Some(b"OK".to_vec())
             }
@@ -938,7 +935,7 @@ mod tests {
         
         let mut server = new_tcp_server_with_config("127.0.0.1:8081", BenchHandler, config).unwrap();
         
-        let server_handle = thread::spawn(move || {
+        let _server_handle = thread::spawn(move || {
             println!("Starting benchmark server on 127.0.0.1:8081");
             server.serve().unwrap();
         });
@@ -975,189 +972,4 @@ mod tests {
         
         assert!(rps > 100.0, "Performance too low: {:.2} req/s", rps);
     }
-}
-
-// Example usage and documentation
-#[cfg(feature = "examples")]
-mod examples {
-    use super::*;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    
-    /// Example: Custom HTTP-like handler with routing
-    pub struct WebServerHandler {
-        request_count: AtomicUsize,
-    }
-    
-    impl WebServerHandler {
-        pub fn new() -> Self {
-            Self {
-                request_count: AtomicUsize::new(0),
-            }
-        }
-        
-        fn handle_get_request(&self, path: &str) -> Vec<u8> {
-            let count = self.request_count.fetch_add(1, Ordering::Relaxed);
-            
-            let response = match path {
-                "/" => format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 55\r\n\r\n<html><body><h1>FRD-PU Server</h1><p>Requests: {}</p></body></html>", count),
-                "/api/status" => format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 45\r\n\r\n{{\"status\":\"ok\",\"requests\":{},\"server\":\"FRD-PU\"}}", count),
-                "/api/health" => "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK".to_string(),
-                _ => "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\n\r\nNot Found".to_string(),
-            };
-            
-            response.into_bytes()
-        }
-    }
-    
-    impl ConnectionHandler for WebServerHandler {
-        fn handle_data(&self, data: &[u8], addr: SocketAddr) -> Option<Vec<u8>> {
-            let request = String::from_utf8_lossy(data);
-            
-            // Parse HTTP request
-            if let Some(first_line) = request.lines().next() {
-                let parts: Vec<&str> = first_line.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0] == "GET" {
-                    return Some(self.handle_get_request(parts[1]));
-                }
-            }
-            
-            // Bad request
-            Some("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request".as_bytes().to_vec())
-        }
-        
-        fn on_connect(&self, addr: SocketAddr) {
-            println!("[{}] New connection from {}", 
-                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"), addr);
-        }
-        
-        fn on_disconnect(&self, addr: SocketAddr) {
-            println!("[{}] Connection closed: {}", 
-                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"), addr);
-        }
-        
-        fn on_server_start(&self) {
-            println!("🚀 FRD-PU Web Server started - Maximum performance mode!");
-        }
-        
-        fn health_check(&self) -> bool {
-            // Add your health check logic here
-            true
-        }
-    }
-    
-    /// Example: High-performance file server handler
-    pub struct FileServerHandler {
-        root_dir: std::path::PathBuf,
-        cache: std::collections::HashMap<String, Vec<u8>>,
-    }
-    
-    impl FileServerHandler {
-        pub fn new(root_dir: &str) -> Self {
-            Self {
-                root_dir: std::path::PathBuf::from(root_dir),
-                cache: std::collections::HashMap::new(),
-            }
-        }
-        
-        fn serve_file(&self, path: &str) -> Vec<u8> {
-            let file_path = self.root_dir.join(&path[1..]); // Remove leading '/'
-            
-            match std::fs::read(&file_path) {
-                Ok(content) => {
-                    let content_type = match file_path.extension().and_then(|ext| ext.to_str()) {
-                        Some("html") => "text/html",
-                        Some("css") => "text/css",
-                        Some("js") => "application/javascript",
-                        Some("json") => "application/json",
-                        Some("png") => "image/png",
-                        Some("jpg") | Some("jpeg") => "image/jpeg",
-                        Some("gif") => "image/gif",
-                        _ => "application/octet-stream",
-                    };
-                    
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: public, max-age=3600\r\n\r\n",
-                        content_type,
-                        content.len()
-                    );
-                    
-                    let mut result = response.into_bytes();
-                    result.extend(content);
-                    result
-                }
-                Err(_) => {
-                    "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 47\r\n\r\n<html><body><h1>404 - File Not Found</h1></body></html>".as_bytes().to_vec()
-                }
-            }
-        }
-    }
-    
-    impl ConnectionHandler for FileServerHandler {
-        fn handle_data(&self, data: &[u8], _addr: SocketAddr) -> Option<Vec<u8>> {
-            let request = String::from_utf8_lossy(data);
-            
-            if let Some(first_line) = request.lines().next() {
-                let parts: Vec<&str> = first_line.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0] == "GET" {
-                    let path = if parts[1] == "/" { "/index.html" } else { parts[1] };
-                    return Some(self.serve_file(path));
-                }
-            }
-            
-            Some("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request".as_bytes().to_vec())
-        }
-    }
-    
-    /// Example usage function
-    pub fn run_example_servers() {
-        println!("=== FRD-PU TCP Server Examples ===\n");
-        
-        // Example 1: High-performance web server
-        println!("1. Starting web server on localhost:8080");
-        let web_config = ServerConfig {
-            max_connections: 10000,
-            buffer_size: 16384,
-            timeout: Duration::from_secs(30),
-            rate_limit: 1000,
-            ..Default::default()
-        };
-        
-        let mut web_server = new_tcp_server_with_config("127.0.0.1:8080", WebServerHandler::new(), web_config)
-            .expect("Failed to create web server");
-        
-        thread::spawn(move || {
-            web_server.serve().expect("Web server failed");
-        });
-        
-        // Example 2: File server
-        println!("2. Starting file server on localhost:8081");
-        let file_config = ServerConfig {
-            max_connections: 5000,
-            buffer_size: 32768,
-            timeout: Duration::from_secs(60),
-            rate_limit: 500,
-            ..Default::default()
-        };
-        
-        let mut file_server = new_tcp_server_with_config("127.0.0.1:8081", FileServerHandler::new("./static"), file_config)
-            .expect("Failed to create file server");
-        
-        thread::spawn(move || {
-            file_server.serve().expect("File server failed");
-        });
-        
-        // Example 3: Echo server for testing
-        println!("3. Starting echo server on localhost:8082");
-        let mut echo_server = new_echo_server("127.0.0.1:8082")
-            .expect("Failed to create echo server");
-        
-        echo_server.serve().expect("Echo server failed");
-    }
-}
-
-/// Main function for running examples
-#[cfg(all(feature = "examples", not(test)))]
-fn main() {
-    examples::run_example_servers();
 }
