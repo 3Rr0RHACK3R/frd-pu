@@ -11,21 +11,18 @@
 //!
 //! 1.  **Default Memory Management:** Uses standard Rust `Vec` and the global allocator,
 //!     providing a convenient and safe API for general use.
-//! 2.  **Manual Memory Management:** This API provides constructors that wrap a pre-existing
-//!     mutable slice (`&'a mut [f64]`). This allows the user to manually control memory
-//!     allocation and deallocation from a memory pool or other custom source, ensuring
-//!     zero-allocation operations within this module.
+//! 2.  **Slice-based Initialization:** This API provides constructors that take a mutable
+//!     slice (`&'a mut [f64]`) and create a new instance by **copying** the data.
+//!     This allows the user to initialize a `Matrix` or `Vector` from a pre-existing
+//!     memory region, like a memory pool, while ensuring safe memory management within the struct.
 //!
 //! Future work includes adding more advanced operations such as matrix inversion,
 //! determinant calculation, and decomposition algorithms like LU or SVD.
 
-use std::ops::{Add, Mul};
-use std::fmt;
-
 // Conditionally enable SIMD support for specific CPU architectures.
 // This example uses AVX2 for `f64` types, common on modern x86-64 CPUs.
 #[cfg(target_feature = "avx2")]
-use std::arch::x86_64::{_mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_storeu_pd};
+use std::arch::x86_64::{_mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_storeu_pd};
 
 /// A fixed-size matrix with elements of type `f64`.
 /// The data is stored in a flat vector in row-major order.
@@ -34,8 +31,8 @@ pub struct Matrix<'a> {
     data: Vec<f64>,
     rows: usize,
     cols: usize,
-    // A lifetime `'a` is used to indicate that this struct
-    // can borrow from an external slice for its data.
+    // A lifetime `'a` is used to indicate that the struct's creation
+    // might be tied to the lifetime of an input slice, even though it owns its data.
     _phantom: std::marker::PhantomData<&'a mut [f64]>,
 }
 
@@ -54,33 +51,27 @@ impl Matrix<'_> {
         }
     }
 
-    /// Creates a new `Matrix` that wraps a pre-allocated mutable slice of `f64`.
+    /// Creates a new `Matrix` by copying data from a pre-allocated mutable slice of `f64`.
     ///
-    /// This is the manual memory management API. The caller is responsible for
-    /// managing the lifetime and allocation of the underlying data slice.
+    /// The data from the slice is cloned into a new `Vec`, ensuring the `Matrix`
+    /// owns its data and manages its own memory safely.
     ///
     /// # Arguments
     /// * `rows` - The number of rows.
     /// * `cols` - The number of columns.
-    /// * `data_slice` - A mutable slice of `f64` to use as the matrix's data.
+    /// * `data_slice` - A mutable slice of `f64` whose data will be copied.
     ///
     /// # Panics
     /// Panics if the size of the slice does not match `rows * cols`.
     pub fn from_slice_mut<'a>(rows: usize, cols: usize, data_slice: &'a mut [f64]) -> Matrix<'a> {
         assert_eq!(data_slice.len(), rows * cols, "Slice size must match matrix dimensions.");
         
-        let data = unsafe {
-            // This is safe because we are taking the entire slice and converting it
-            // into a Vec. The Vec's destructor will free the memory when it goes
-            // out of scope, so the caller must ensure this is the correct behavior.
-            let ptr = data_slice.as_mut_ptr();
-            let len = data_slice.len();
-            let capacity = data_slice.len();
-            std::mem::forget(data_slice);
-            Vec::from_raw_parts(ptr, len, capacity)
-        };
-        
-        Matrix { data, rows, cols, _phantom: std::marker::PhantomData }
+        Matrix {
+            data: data_slice.to_vec(),
+            rows,
+            cols,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Gets an immutable reference to an element at `(row, col)`.
@@ -144,33 +135,50 @@ impl Matrix<'_> {
         }
     }
     
-    // Safety: This function requires the `avx2` target feature to be enabled.
+    /// Internal helper to transpose a matrix, making it suitable for SIMD operations.
+    fn transpose(m: &Self) -> Self {
+        let mut transposed = Self::new(m.cols, m.rows);
+        for i in 0..m.rows {
+            for j in 0..m.cols {
+                transposed.data[j * m.rows + i] = m.data[i * m.cols + j];
+            }
+        }
+        transposed
+    }
+    
     #[cfg(target_feature = "avx2")]
     /// A SIMD-optimized matrix multiplication using AVX2 instructions.
     /// This method loads and processes 4 elements at a time.
+    /// For efficient SIMD access, the second matrix `b` is transposed internally.
+    // Safety: This function requires the `avx2` target feature to be enabled.
     fn mul_matrix_avx(a: &Self, b: &Self, result: &mut Self) {
+        let b_transposed = Self::transpose(b);
         unsafe {
             for i in 0..a.rows {
-                for j in 0..b.cols {
-                    let mut sum_vec = std::arch::x86_64::_mm256_setzero_pd();
+                for j in 0..b_transposed.rows { // now j corresponds to the original b.cols
+                    let mut sum_vec = _mm256_setzero_pd();
                     let mut k = 0;
+                    
+                    // Process 4 elements at a time
                     while k + 4 <= a.cols {
-                        let a_vec = std::arch::x86_64::_mm256_loadu_pd(&a.data[i * a.cols + k]);
-                        let b_vec = std::arch::x86_64::_mm256_loadu_pd(&b.data[k * b.cols + j]);
-                        let mul_vec = std::arch::x86_64::_mm256_mul_pd(a_vec, b_vec);
-                        sum_vec = std::arch::x86_64::_mm256_add_pd(sum_vec, mul_vec);
+                        let a_vec = _mm256_loadu_pd(&a.data[i * a.cols + k]);
+                        // Accessing transposed B is now row-major and thus SIMD-friendly
+                        let b_vec = _mm256_loadu_pd(&b_transposed.data[j * b_transposed.cols + k]);
+                        sum_vec = _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec));
                         k += 4;
                     }
-                    let mut sum_arr: [f64; 4] = [0.0; 4];
-                    std::arch::x86_64::_mm256_storeu_pd(&mut sum_arr[0], sum_vec);
-                    let mut sum = sum_arr.iter().sum::<f64>();
-                    
+
+                    // Horizontal sum of the accumulator vector
+                    let mut sum_arr = [0.0f64; 4];
+                    _mm256_storeu_pd(sum_arr.as_mut_ptr(), sum_vec);
+                    let mut sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+
                     // Handle any remaining elements that don't fit into a 4-element block.
                     while k < a.cols {
-                         sum += a.data[i * a.cols + k] * b.data[k * b.cols + j];
+                         sum += a.data[i * a.cols + k] * b_transposed.data[j * b_transposed.cols + k];
                          k += 1;
                     }
-                    result.data[i * b.cols + j] = sum;
+                    result.data[i * result.cols + j] = sum;
                 }
             }
         }
@@ -195,25 +203,21 @@ impl Vector<'_> {
         }
     }
 
-    /// Creates a new `Vector` that wraps a pre-allocated mutable slice of `f64`.
+    /// Creates a new `Vector` by copying data from a pre-allocated mutable slice of `f64`.
     ///
-    /// This is the manual memory management API. The caller is responsible for
-    /// managing the lifetime and allocation of the underlying data slice.
+    /// The data from the slice is cloned into a new `Vec`, ensuring the `Vector`
+    /// owns its data and manages its own memory safely.
     ///
     /// # Panics
     /// Panics if the size of the slice does not match `len`.
     pub fn from_slice_mut<'a>(len: usize, data_slice: &'a mut [f64]) -> Vector<'a> {
         assert_eq!(data_slice.len(), len, "Slice size must match vector length.");
         
-        let data = unsafe {
-            let ptr = data_slice.as_mut_ptr();
-            let len_val = data_slice.len();
-            let capacity = data_slice.len();
-            std::mem::forget(data_slice);
-            Vec::from_raw_parts(ptr, len_val, capacity)
-        };
-        
-        Vector { data, len, _phantom: std::marker::PhantomData }
+        Vector {
+            data: data_slice.to_vec(),
+            len,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Gets an immutable reference to an element at `index`.
@@ -232,23 +236,24 @@ impl Vector<'_> {
             return None;
         }
 
-        let mut sum = 0.0;
+        let mut sum;
+        
         #[cfg(target_feature = "avx2")]
         {
             // Use SIMD-optimized dot product.
             unsafe {
-                let mut sum_vec = std::arch::x86_64::_mm256_setzero_pd();
+                let mut sum_vec = _mm256_setzero_pd();
                 let mut i = 0;
                 while i + 4 <= self.len {
-                    let a_vec = std::arch::x86_64::_mm256_loadu_pd(&self.data[i]);
-                    let b_vec = std::arch::x86_64::_mm256_loadu_pd(&other.data[i]);
-                    let mul_vec = std::arch::x86_64::_mm256_mul_pd(a_vec, b_vec);
-                    sum_vec = std::arch::x86_64::_mm256_add_pd(sum_vec, mul_vec);
+                    let a_vec = _mm256_loadu_pd(&self.data[i]);
+                    let b_vec = _mm256_loadu_pd(&other.data[i]);
+                    sum_vec = _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec));
                     i += 4;
                 }
+
                 let mut sum_arr: [f64; 4] = [0.0; 4];
-                std::arch::x86_64::_mm256_storeu_pd(&mut sum_arr[0], sum_vec);
-                sum += sum_arr.iter().sum::<f64>();
+                _mm256_storeu_pd(sum_arr.as_mut_ptr(), sum_vec);
+                sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
                 
                 while i < self.len {
                     sum += self.data[i] * other.data[i];
@@ -256,9 +261,11 @@ impl Vector<'_> {
                 }
             }
         }
+        
         #[cfg(not(target_feature = "avx2"))]
         {
             // Fallback to standard dot product.
+            sum = 0.0;
             for i in 0..self.len {
                 sum += self.data[i] * other.data[i];
             }
