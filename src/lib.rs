@@ -34,6 +34,7 @@
 //!     * `buffer_pool` for reusable I/O buffers that eliminate allocation/deallocation cycles.
 //!     * `universal_processor` for revolutionary fractal processing that scales from bytes to terabytes.
 //!     * `tcp_server` for a production-ready, maximum performance, cross-platform TCP server.
+//!     * `matrix_vector` for a zero-dependency, high-performance linear algebra module.
 
 // Public Modules (ALL existing modules preserved)
 pub mod bloom_filter;
@@ -50,7 +51,9 @@ pub mod compression;
 pub mod memory_pool; 
 pub mod buffer_pool; 
 pub mod universal_processor; 
-pub mod tcp_server; 
+pub mod tcp_server;
+// NEW MODULE: matrix_vector
+pub mod matrix_vector;
 
 // Re-export the public APIs for easy access (ALL existing re-exports preserved)
 pub use bloom_filter::{BloomFilter, BloomFilterError};
@@ -143,4 +146,10 @@ pub use tcp_server::{
     DEFAULT_MAX_CONNECTIONS,
     DEFAULT_TIMEOUT_SECS,
     DEFAULT_RATE_LIMIT
+};
+
+// NEW RE-EXPORTS for the matrix_vector module
+pub use matrix_vector::{
+    Matrix,
+    Vector,
 };
