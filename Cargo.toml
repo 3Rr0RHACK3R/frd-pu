@@ -2,7 +2,7 @@
 
 [package]
 name = "frd_pu"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = " A high-performance, zero-dependency library for creating efficient and fast applications."
 authors = ["3rror"]
