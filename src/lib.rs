@@ -1,7 +1,7 @@
 // src/lib.rs
 
 //! # FRD-PU: The Fast RAM Data-Processing Unit
-//!
+//! Crate at https://crates.io/crates/frd_pu and https://crates.io/search?q=frd-pu
 //! A high-performance, zero-dependency library built from the ground up for extreme efficiency.
 //! It is designed to handle massive computational tasks and data streams with minimal resource
 //! consumption. This library is ideal for creating hyper-fast applications without a monstrous
@@ -35,6 +35,7 @@
 //!     * `universal_processor` for revolutionary fractal processing that scales from bytes to terabytes.
 //!     * `tcp_server` for a production-ready, maximum performance, cross-platform TCP server.
 //!     * `matrix_vector` for a zero-dependency, high-performance linear algebra module.
+//!     * `distributed_ledger` for a lightweight, immutable, and high-throughput data ledger.
 
 // Public Modules (ALL existing modules preserved)
 pub mod bloom_filter;
@@ -52,8 +53,9 @@ pub mod memory_pool;
 pub mod buffer_pool; 
 pub mod universal_processor; 
 pub mod tcp_server;
-// NEW MODULE: matrix_vector
 pub mod matrix_vector;
+// NEW MODULE: distributed_ledger
+pub mod distributed_ledger;
 
 // Re-export the public APIs for easy access (ALL existing re-exports preserved)
 pub use bloom_filter::{BloomFilter, BloomFilterError};
@@ -152,4 +154,12 @@ pub use tcp_server::{
 pub use matrix_vector::{
     Matrix,
     Vector,
+};
+
+// RE-EXPORTS for distributed_ledger module
+pub use distributed_ledger::{
+    Ledger,
+    Block,
+    Record,
+    LedgerError
 };
