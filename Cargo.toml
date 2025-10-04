@@ -1,16 +1,43 @@
-# Cargo.toml
-
 [package]
-name = "frd_pu"
-version = "0.2.7"
+name = "frd-pu"
+version = "0.2.0"
 edition = "2021"
-description = " A high-performance, zero-dependency library for creating efficient and fast applications."
-authors = ["3rror"]
-license = "MIT"
-readme = "README.md"
+authors = ["3Rr0RHACK3R"]
+description = "FRD-PU: Ultra-fast modular Rust crate with C++/C static-engine backends (zero-copy streaming, high performance I/O)."
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/3Rr0RHACK3R/frd-pu"
-keywords = ["high-performance", "data-processing", "zero-dependency", "memory-efficient", "rust"]
-categories = ["data-structures", "algorithms"]
+readme = "README.md"
+keywords = ["zerocopy", "io", "streaming", "engine", "performance"]
+categories = ["network-programming", "filesystem", "os::windows", "os::linux"]
 
-# This library is intentionally zero-dependency.
-[dependencies]
+[lib]
+name = "frd_pu"
+crate-type = ["rlib", "staticlib"]
+
+[features]
+default = []
+
+[build-dependencies]
+# none — libraries are precompiled
+
+[package.metadata.linker]
+#
+
+# For Linux/macOS
+unix-libs = [
+    { path = "src/engine/static/libzerocopy.a", kind = "static" }
+]
+
+# For Windows
+windows-libs = [
+    { path = "src/engine/static/zerocopy.lib", kind = "static" }
+]
+
+[package.metadata.docs]
+include = ["src/engine/zerocopy.rs", "src/lib.rs"]
+
+[package.metadata.engine]
+name = "ZeroCopy Streaming Engine"
+language = "C"
+architecture = ["x86", "x86_64"]
+platforms = ["windows", "linux"]
